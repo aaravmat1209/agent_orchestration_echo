@@ -16,8 +16,8 @@ from utils import get_ssm_parameter, get_aws_info, get_m2m_token_for_agent
 import sys
 from pathlib import Path
 
-# Add host_adk_agent scripts to path for get_m2m_token function
-sys.path.insert(0, str(Path(__file__).parent.parent / "host_adk_agent" / "scripts"))
+# Add host_strands_agent scripts to path for get_m2m_token function
+sys.path.insert(0, str(Path(__file__).parent.parent / "host_strands_agent" / "scripts"))
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 # Agent-to-Agent (A2A) Multi-Agent System on Amazon Bedrock AgentCore for Incident Response Logging
 
-A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protocol.org/latest/) protocol using specialized agents running on [Amazon Bedrock `AgentCore` runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html), demonstrating intelligent coordination for AWS infrastructure monitoring and operations management. This repository walks you through setting up three core agents to answer questions about incidents and metrics in your AWS accounts and search for best remediation strategies. A monitoring agent (built using the [`Strands` Agents SDK](https://strandsagents.com/latest/)) is responsible for handling all questions related to metrics and logs within AWS and cross AWS accounts. A remediation agent (built using [`OpenAI`'s Agents SDK](https://openai.github.io/openai-agents-python/)) is responsible to doing efficient web searches for best remediation strategies and optimization techniques that the user can ask for. Both agents run on separate runtimes as `A2A` servers and utilize all `AgentCore` primitives - memory for context management, observability for deep level analysis about both agents, gateway for access to tools (`Cloudwatch`, `JIRA` and `TAVILY` APIs) and `AgentCore` identity for enabling inbound and outbound access into the agent and then into the resources that the agent can access using OAuth 2.0 and APIs. These two agents are then managed by a host [`Google ADK` agent](https://google.github.io/adk-docs/) that acts as a client and delegates tasks to each of these agents using A2A on Runtime. The Google ADK host agent runs on a separate `AgentCore` runtime of its own.
+A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protocol.org/latest/) protocol using specialized agents running on [Amazon Bedrock `AgentCore` runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html), demonstrating intelligent coordination for AWS infrastructure monitoring and operations management. This repository walks you through setting up three core agents to answer questions about incidents and metrics in your AWS accounts and search for best remediation strategies. A monitoring agent (built using the [`Strands` Agents SDK](https://strandsagents.com/latest/)) is responsible for handling all questions related to metrics and logs within AWS and cross AWS accounts. A remediation agent (built using [`OpenAI`'s Agents SDK](https://openai.github.io/openai-agents-python/)) is responsible to doing efficient web searches for best remediation strategies and optimization techniques that the user can ask for. Both agents run on separate runtimes as `A2A` servers and utilize all `AgentCore` primitives - memory for context management, observability for deep level analysis about both agents, gateway for access to tools (`Cloudwatch`, `JIRA` and `TAVILY` APIs) and `AgentCore` identity for enabling inbound and outbound access into the agent and then into the resources that the agent can access using OAuth 2.0 and APIs. These two agents are then managed by a host [`Strands` agent](https://strandsagents.com/latest/) that acts as a client and delegates tasks to each of these agents using A2A on Runtime. The Strands host agent runs on a separate `AgentCore` runtime of its own.
 
 ## Demo
 
@@ -14,7 +14,7 @@ A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protoco
 > **Default Models**
 >
 > This solution uses the following AI models by default:
-> - **Host Agent (Google ADK)**: `gemini-2.5-flash`
+> - **Host Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
 > - **Monitoring Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
 > - **Web Search Agent (OpenAI)**: `gpt-4o-2024-08-06`
 >
@@ -68,9 +68,8 @@ A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protoco
 5. **API Keys**: You'll need the following API keys (the deployment script will prompt for these):
    - **OpenAI API Key**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
    - **Tavily API Key**: Get from [Tavily](https://tavily.com/)
-   - **Google API Key**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-   > **Note**: Make sure your OpenAI and Google account has credits if you are using paid models.
+   > **Note**: Make sure your OpenAI account has credits if you are using paid models. The host agent now uses Amazon Bedrock models instead of Google AI.
 
 6. **Supported Regions**: This solution is currently tested and supported in the following AWS regions:
 
@@ -118,14 +117,18 @@ chmod +x ./setup-env.sh
 npm run dev
 ```
 
-## Google ADK Web App
+## Strands Agent Development
 
-[Agent Development Kit Web](https://github.com/google/adk-web) is the built-in developer UI that integrated with Google Agent Development Kit for easier agent development and debug.
+The host agent now uses the [Strands Agents SDK](https://strandsagents.com/latest/) for multi-agent orchestration. Strands provides a model-driven approach to building AI agents with built-in A2A protocol support.
 
-![adk](./images/adk.gif)
+Key benefits of the Strands implementation:
+- **Native A2A Support**: Built-in Agent-to-Agent protocol integration
+- **Bedrock Integration**: Direct support for Amazon Bedrock models
+- **Tool Integration**: Easy integration with A2A agents as tools
+- **Streaming Support**: Real-time streaming responses
+- **Production Ready**: Designed for production deployments
 
-1. Follow setup [instructions](https://github.com/google/adk-web?tab=readme-ov-file#-prerequisite).
-2. From the root of this [project](./) run `adk web`.
+For development and debugging, you can use the Strands documentation and examples at [strandsagents.com](https://strandsagents.com/latest/).
 
 ## A2A Protocol Inspector
 
@@ -156,7 +159,7 @@ uv run monitoring_strands_agent/scripts/get_m2m_token.py
 
 uv run web_search_openai_agents/scripts/get_m2m_token.py
 
-uv run host_adk_agent/scripts/get_m2m_token.py
+uv run host_strands_agent/scripts/get_m2m_token.py
 ```
 
 ## Test Scripts

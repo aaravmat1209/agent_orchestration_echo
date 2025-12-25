@@ -1,0 +1,14 @@
+[project]
+name = "host-strands"
+version = "0.1.0"
+description = "Host Agent using Strands framework on AgentCore Runtime"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "strands-agents[a2a]>=1.0.0",
+    "a2a-sdk>=0.3.9",
+    "httpx",
+    "boto3",
+    "bedrock-agentcore>=1.0.0",
+    "python-dotenv>=1.1.1",
+]

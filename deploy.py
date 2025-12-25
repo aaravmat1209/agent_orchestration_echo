@@ -547,10 +547,10 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
         # Agent directories are taken from CloudFormation defaults - not configurable
         "monitoring_agent_directory": "monitoring_agent",
         "web_search_agent_directory": "web_search_openai_agents",
-        "host_agent_directory": "host_adk_agent",
+        "host_agent_directory": "host_strands_agent",
     }
     print_info(
-        "Agent directories will use CloudFormation defaults (monitoring_agent, web_search_openai_agents, host_adk_agent)"
+        "Agent directories will use CloudFormation defaults (monitoring_agent, web_search_openai_agents, host_strands_agent)"
     )
 
     # API Keys
@@ -583,21 +583,24 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
                 required=True,
             ),
             "tavily": get_secret("Tavily API Key", required=True),
-            "google": get_secret("Google API Key (for ADK)", required=True),
-            "google_model": get_input(
-                "Google Model ID",
-                default=(
-                    existing_config.get("api_keys", {}).get(
-                        "google_model", "gemini-2.5-flash"
-                    )
-                    if use_existing
-                    else "gemini-2.5-flash"
-                ),
-                required=True,
-            ),
         }
     else:
         config["api_keys"] = existing_config.get("api_keys", {})
+
+    # Host agent model configuration (separate from API keys since it uses Bedrock)
+    config["host_agent"] = {
+        "bedrock_model": get_input(
+            "Host Agent Bedrock Model ID",
+            default=(
+                existing_config.get("host_agent", {}).get(
+                    "bedrock_model", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                )
+                if use_existing
+                else "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+            ),
+            required=True,
+        ),
+    }
 
     return config
 
@@ -636,7 +639,9 @@ def display_configuration(config: Dict[str, Any]):
     print(f"\n{Colors.BOLD}API Keys:{Colors.END}")
     print(f"  OpenAI API Key: {'*' * 20} (configured)")
     print(f"  Tavily API Key: {'*' * 20} (configured)")
-    print(f"  Google API Key: {'*' * 20} (configured)")
+
+    print(f"\n{Colors.BOLD}Host Agent Configuration:{Colors.END}")
+    print(f"  Bedrock Model: {config['host_agent']['bedrock_model']}")
 
     print()
 
@@ -931,8 +936,7 @@ def deploy_host_agent(config: Dict[str, Any]) -> bool:
         stack_name=config["stacks"]["host_agent"],
         template_file="cloudformation/host_agent.yaml",
         parameters=[
-            f"ParameterKey=GoogleApiKey,ParameterValue={config['api_keys']['google']}",
-            f"ParameterKey=GoogleModelId,ParameterValue={config['api_keys']['google_model']}",
+            f"ParameterKey=BedrockModelId,ParameterValue={config['host_agent']['bedrock_model']}",
             f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
             f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
         ],
@@ -1006,8 +1010,7 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
             "host_agent",
             "cloudformation/host_agent.yaml",
             [
-                f"ParameterKey=GoogleApiKey,ParameterValue={config['api_keys']['google']}",
-                f"ParameterKey=GoogleModelId,ParameterValue={config['api_keys']['google_model']}",
+                f"ParameterKey=BedrockModelId,ParameterValue={config['host_agent']['bedrock_model']}",
                 f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
                 f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
             ],

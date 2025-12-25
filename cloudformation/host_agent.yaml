@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: "Host Agent Runtime - ADK-based agent for multi-agent incident response orchestration with Google AI integration"
+Description: "Host Agent Runtime - Strands-based agent for multi-agent incident response orchestration with Bedrock integration"
 
 Parameters:
-  GoogleApiKey:
+  BedrockModelId:
     Type: String
-    Description: Google API Key
+    Description: Amazon Bedrock model id
+    Default: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
 
   GitHubURL:
     Type: String
@@ -14,16 +15,11 @@ Parameters:
   AgentDirectory:
     Type: String
     Description: Agent directory with Dockerfile of agent
-    Default: host_adk_agent
+    Default: host_strands_agent
 
   CognitoStackName:
     Type: String
     Description: Name of the Cognito CloudFormation stack to import values from
-
-  GoogleModelId:
-    Type: String
-    Description: Google model id
-    Default: 'gemini-2.5-flash'
 
 Resources:
   AgentCoreRuntimeExecutionRole:
@@ -722,9 +718,7 @@ Resources:
           AllowedClients:
             - Fn::ImportValue: !Sub '${CognitoStackName}-WebUserPoolClientId'
       EnvironmentVariables:
-        GOOGLE_MODEL_ID: !Ref GoogleModelId
-        GOOGLE_API_KEY: !Ref GoogleApiKey
-        GOOGLE_GENAI_USE_VERTEXAI: 0
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
         MCP_REGION: !Sub '${AWS::Region}'
       Tags:
         Name: !Sub '${AWS::StackName}-Agent-Runtime'
