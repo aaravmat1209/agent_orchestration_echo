@@ -1,0 +1,15 @@
+[project]
+name = "echo-ink-agent"
+version = "0.1.0"
+description = "Echo Ink Agent - Sophisticated educational document creation assistant using Strands SDK"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "a2a-sdk>=0.3.12",
+    "bedrock-agentcore>=0.1.7",
+    "strands-agents>=1.16.0",
+    "strands-tools>=1.0.0",
+    "uvicorn>=0.37.0",
+    "python-dotenv>=1.0.0",
+    "pathlib>=1.0.0",
+]
