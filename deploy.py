@@ -419,6 +419,7 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
         "monitoring_agent": ("Monitoring Agent Stack Name", "monitor-agent-a2a"),
         "web_search_agent": ("Web Search Agent Stack Name", "web-search-agent-a2a"),
         "echo_ink_agent": ("Echo Ink Agent Stack Name", "echo-ink-agent-a2a"),
+        "echo_prepare_agent": ("Echo Prepare Agent Stack Name", "echo-prepare-agent-a2a"),
         "host_agent": ("Host Agent Stack Name", "host-agent-a2a"),
     }
 
@@ -947,9 +948,26 @@ def deploy_echo_ink_agent(config: Dict[str, Any]) -> bool:
     )
 
 
+def deploy_echo_prepare_agent(config: Dict[str, Any]) -> bool:
+    """Deploy Echo Prepare Agent CloudFormation stack"""
+    print_header("Step 5: Deploy Echo Prepare Agent")
+
+    return deploy_stack(
+        stack_name=config["stacks"]["echo_prepare_agent"],
+        template_file="cloudformation/echo_prepare_agent.yaml",
+        parameters=[
+            f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
+            f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
+            f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
+        ],
+        region=config["aws"]["region"],
+        bucket_name=config["s3"]["smithy_models_bucket"],
+    )
+
+
 def deploy_host_agent(config: Dict[str, Any]) -> bool:
     """Deploy Host Agent CloudFormation stack"""
-    print_header("Step 5: Deploy Host Agent")
+    print_header("Step 6: Deploy Host Agent")
 
     return deploy_stack(
         stack_name=config["stacks"]["host_agent"],
@@ -1035,6 +1053,17 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
             ],
         ),
         (
+            "Echo Prepare Agent",
+            config,
+            "echo_prepare_agent",
+            "cloudformation/echo_prepare_agent.yaml",
+            [
+                f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
+                f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
+                f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
+            ],
+        ),
+        (
             "Host Agent",
             config,
             "host_agent",
@@ -1049,7 +1078,7 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
 
     # Deploy agents in parallel using ThreadPoolExecutor
     results = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         # Submit all deployment tasks
         future_to_agent = {
             executor.submit(deploy_agent_parallel, *task): task[0] for task in tasks

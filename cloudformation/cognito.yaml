@@ -75,6 +75,8 @@ Resources:
           ScopeDescription: 'Gateway specific access'
         - ScopeName: 'echoink'
           ScopeDescription: 'Echo Ink agent specific access'
+        - ScopeName: 'echoprepare'
+          ScopeDescription: 'Echo Prepare agent specific access'
         - ScopeName: 'hostagent'
           ScopeDescription: 'Host Agent specific access'
 
@@ -175,6 +177,33 @@ Resources:
         - !Sub '${AWS::StackName}-resource-server/read'
         - !Sub '${AWS::StackName}-resource-server/write'
         - !Sub '${AWS::StackName}-resource-server/echoink'
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      PreventUserExistenceErrors: 'ENABLED'
+
+  # Echo Prepare Client for M2M Authentication
+  EchoPrepareClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: M2MResourceServer
+    Properties:
+      ClientName: 'echoprepare-client'
+      UserPoolId: !Ref M2MUserPool
+      GenerateSecret: true
+      ExplicitAuthFlows: []
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - !Sub '${AWS::StackName}-resource-server/read'
+        - !Sub '${AWS::StackName}-resource-server/write'
+        - !Sub '${AWS::StackName}-resource-server/echoprepare'
       AccessTokenValidity: 1
       IdTokenValidity: 1
       RefreshTokenValidity: 1
@@ -292,6 +321,22 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-EchoInk-ClientSecret'
 
+  EchoPrepareClientSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}/echoprepare/client-config'
+      Description: 'Echo Prepare Client configuration for M2M authentication'
+      SecretString: !Sub |
+        {
+          "client_id": "${EchoPrepareClient}",
+          "user_pool_id": "${M2MUserPool}",
+          "token_endpoint": "https://${M2MUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token",
+          "cognito_discovery_url": "https://cognito-idp.${AWS::Region}.amazonaws.com/${M2MUserPool}/.well-known/openid-configuration"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-EchoPrepare-ClientSecret'
+
   # Note: WebUserPoolClient is a public client (no secret) used for PKCE flow
   # No secret is stored for this client as it uses the authorization code flow with PKCE
 
@@ -326,6 +371,7 @@ Resources:
                   - !Ref MonitoringClientSecret
                   - !Ref GatewayClientSecret
                   - !Ref EchoInkClientSecret
+                  - !Ref EchoPrepareClientSecret
 
   # Lambda function to retrieve client secrets
   ClientSecretLambda:
@@ -463,6 +509,16 @@ Resources:
       ClientId: !Ref EchoInkClient
       SecretArn: !Ref EchoInkClientSecret
       ClientType: EchoInk
+
+  EchoPrepareClientSecretUpdater:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: EchoPrepareClientSecret
+    Properties:
+      ServiceToken: !GetAtt ClientSecretLambda.Arn
+      UserPoolId: !Ref M2MUserPool
+      ClientId: !Ref EchoPrepareClient
+      SecretArn: !Ref EchoPrepareClientSecret
+      ClientType: EchoPrepare
 
   # Note: WebUserPoolClient does not need a secret updater as it's a public client
 
@@ -676,6 +732,18 @@ Outputs:
     Value: !Ref EchoInkClientSecret
     Export:
       Name: !Sub '${AWS::StackName}-EchoInkClientSecretArn'
+
+  EchoPrepareClientId:
+    Description: 'Echo Prepare Client ID'
+    Value: !Ref EchoPrepareClient
+    Export:
+      Name: !Sub '${AWS::StackName}-EchoPrepareClientId'
+
+  EchoPrepareClientSecretArn:
+    Description: 'Echo Prepare Client Secret ARN'
+    Value: !Ref EchoPrepareClientSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-EchoPrepareClientSecretArn'
 
   WebUserPoolClientId:
     Description: 'Web User Pool Client ID (public client for PKCE flow)'

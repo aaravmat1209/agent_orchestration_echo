@@ -42,6 +42,12 @@ ECHOINK_AGENT_ARN = (
     f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{ECHOINK_AGENT_ID}"
 )
 
+ECHOPREPARE_AGENT_ID = get_ssm_parameter("/echoprepareagent/agentcore/runtime-id")
+ECHOPREPARE_PROVIDER_NAME = get_ssm_parameter("/echoprepareagent/agentcore/provider-name")
+ECHOPREPARE_AGENT_ARN = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{ECHOPREPARE_AGENT_ID}"
+)
+
 
 class A2AAgentTool:
     """A2A Agent Tool for communicating with remote agents via A2A protocol"""
@@ -168,6 +174,11 @@ class HostAgent:
             f"{quote(ECHOINK_AGENT_ARN, safe='')}/invocations"
         )
 
+        echoprepare_agent_url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{quote(ECHOPREPARE_AGENT_ARN, safe='')}/invocations"
+        )
+
         self.monitor_tool = A2AAgentTool(
             agent_url=monitor_agent_url,
             agent_name="monitor_agent",
@@ -191,20 +202,29 @@ class HostAgent:
             session_id=session_id,
             actor_id=actor_id
         )
-        
+
+        self.echoprepare_tool = A2AAgentTool(
+            agent_url=echoprepare_agent_url,
+            agent_name="echoprepare_agent",
+            provider_name=ECHOPREPARE_PROVIDER_NAME,
+            session_id=session_id,
+            actor_id=actor_id
+        )
+
         # Create Bedrock model
         bedrock_model = BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=region)
         
         # Create Strands agent with A2A tools
         self.agent = Agent(
             name="Host Agent",
-            description="AWS incident response orchestrator that delegates tasks to specialized agents",
+            description="Intelligent orchestrator that delegates tasks to specialized agents",
             system_prompt=SYSTEM_PROMPT,
             model=bedrock_model,
             tools=[
                 self._create_monitor_tool(),
                 self._create_websearch_tool(),
-                self._create_echoink_tool()
+                self._create_echoink_tool(),
+                self._create_echoprepare_tool()
             ]
         )
         
@@ -264,6 +284,25 @@ class HostAgent:
 
         return echoink_agent
 
+    def _create_echoprepare_tool(self):
+        """Create the echo prepare agent tool"""
+        @tool
+        async def echoprepare_agent(message: str) -> str:
+            """
+            Delegate student study and exam preparation tasks to the Echo Prepare agent.
+            Use for helping students research topics, generate practice questions, create study notes,
+            and track learning progress.
+
+            Args:
+                message: The study assistance request or exam preparation task to delegate
+
+            Returns:
+                Response from the Echo Prepare agent
+            """
+            return await self.echoprepare_tool.call_agent(message)
+
+        return echoprepare_agent
+
     async def stream(self, query: str):
         """Stream response from the agent"""
         try:
@@ -319,9 +358,12 @@ async def get_agent_and_card(session_id: str, actor_id: str):
         },
         "echoink_agent": {
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOINK_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
+        },
+        "echoprepare_agent": {
+            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOPREPARE_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         }
     }
-    
+
     return host_agent, agents_cards
 
 
