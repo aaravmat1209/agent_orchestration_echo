@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Cognito User Pool with OAuth 2.0 client credentials flow for machine-to-machine (M2M) authentication. Creates two client applications (WebSearch, Monitoring) with scoped access and stores credentials in Secrets Manager with KMS encryption.'
+Description: 'Cognito User Pool with OAuth 2.0 client credentials flow for machine-to-machine (M2M) authentication. Creates client applications (WebSearch, Monitoring, EchoInk, Gateway) with scoped access and stores credentials in Secrets Manager with KMS encryption.'
 
 Parameters:
   DomainName:
@@ -73,6 +73,8 @@ Resources:
           ScopeDescription: 'Monitoring specific access'
         - ScopeName: 'gateway'
           ScopeDescription: 'Gateway specific access'
+        - ScopeName: 'echoink'
+          ScopeDescription: 'Echo Ink agent specific access'
         - ScopeName: 'hostagent'
           ScopeDescription: 'Host Agent specific access'
 
@@ -146,6 +148,33 @@ Resources:
       AllowedOAuthScopes:
         - !Sub '${AWS::StackName}-resource-server/read'
         - !Sub '${AWS::StackName}-resource-server/gateway'
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      PreventUserExistenceErrors: 'ENABLED'
+
+  # Echo Ink Client for M2M Authentication
+  EchoInkClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: M2MResourceServer
+    Properties:
+      ClientName: 'echoink-client'
+      UserPoolId: !Ref M2MUserPool
+      GenerateSecret: true
+      ExplicitAuthFlows: []
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - !Sub '${AWS::StackName}-resource-server/read'
+        - !Sub '${AWS::StackName}-resource-server/write'
+        - !Sub '${AWS::StackName}-resource-server/echoink'
       AccessTokenValidity: 1
       IdTokenValidity: 1
       RefreshTokenValidity: 1
@@ -247,6 +276,22 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Gateway-ClientSecret'
 
+  EchoInkClientSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}/echoink/client-config'
+      Description: 'Echo Ink Client configuration for M2M authentication'
+      SecretString: !Sub |
+        {
+          "client_id": "${EchoInkClient}",
+          "user_pool_id": "${M2MUserPool}",
+          "token_endpoint": "https://${M2MUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token",
+          "cognito_discovery_url": "https://cognito-idp.${AWS::Region}.amazonaws.com/${M2MUserPool}/.well-known/openid-configuration"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-EchoInk-ClientSecret'
+
   # Note: WebUserPoolClient is a public client (no secret) used for PKCE flow
   # No secret is stored for this client as it uses the authorization code flow with PKCE
 
@@ -280,6 +325,7 @@ Resources:
                   - !Ref WebSearchClientSecret
                   - !Ref MonitoringClientSecret
                   - !Ref GatewayClientSecret
+                  - !Ref EchoInkClientSecret
 
   # Lambda function to retrieve client secrets
   ClientSecretLambda:
@@ -406,6 +452,17 @@ Resources:
       ClientId: !Ref GatewayClient
       SecretArn: !Ref GatewayClientSecret
       ClientType: Gateway
+
+  # Custom resource to update Echo Ink client secret
+  EchoInkClientSecretUpdater:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: EchoInkClientSecret
+    Properties:
+      ServiceToken: !GetAtt ClientSecretLambda.Arn
+      UserPoolId: !Ref M2MUserPool
+      ClientId: !Ref EchoInkClient
+      SecretArn: !Ref EchoInkClientSecret
+      ClientType: EchoInk
 
   # Note: WebUserPoolClient does not need a secret updater as it's a public client
 
@@ -607,6 +664,18 @@ Outputs:
     Value: !Ref GatewayClientSecret
     Export:
       Name: !Sub '${AWS::StackName}-GatewayClientSecretArn'
+
+  EchoInkClientId:
+    Description: 'Echo Ink Client ID'
+    Value: !Ref EchoInkClient
+    Export:
+      Name: !Sub '${AWS::StackName}-EchoInkClientId'
+
+  EchoInkClientSecretArn:
+    Description: 'Echo Ink Client Secret ARN'
+    Value: !Ref EchoInkClientSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-EchoInkClientSecretArn'
 
   WebUserPoolClientId:
     Description: 'Web User Pool Client ID (public client for PKCE flow)'

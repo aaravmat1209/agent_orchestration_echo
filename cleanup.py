@@ -304,7 +304,7 @@ def delete_s3_bucket(bucket_name: str, region: str) -> bool:
 
 def cleanup_s3_bucket(bucket_name: str, region: str) -> bool:
     """Empty and delete S3 bucket"""
-    print_header("Step 5: Delete S3 Bucket")
+    print_header("Step 6: Delete S3 Bucket")
 
     if not empty_s3_bucket(bucket_name, region):
         print_warning("Failed to empty bucket, but continuing...")
@@ -327,21 +327,22 @@ def delete_stack_parallel(
 
 
 def delete_agent_stacks_parallel(config: Dict[str, Any], region: str) -> bool:
-    """Delete all three agent stacks in parallel"""
-    print_header("Steps 1-3: Delete Agent Stacks (Parallel)")
-    print_info("Deleting Host, Web Search, and Monitoring agent stacks in parallel...")
+    """Delete all four agent stacks in parallel"""
+    print_header("Steps 1-4: Delete Agent Stacks (Parallel)")
+    print_info("Deleting Host, Echo Ink, Web Search, and Monitoring agent stacks in parallel...")
     print_warning("This is faster but may produce interleaved output\n")
 
     # Prepare deletion tasks (in reverse dependency order)
     tasks = [
         (config["stacks"]["host_agent"], region, "Host Agent Stack"),
+        (config["stacks"]["echo_ink_agent"], region, "Echo Ink Agent Stack"),
         (config["stacks"]["web_search_agent"], region, "Web Search Agent Stack"),
         (config["stacks"]["monitoring_agent"], region, "Monitoring Agent Stack"),
     ]
 
     # Delete stacks in parallel using ThreadPoolExecutor
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all deletion tasks
         future_to_stack = {
             executor.submit(delete_stack_parallel, *task): task[2]
@@ -402,14 +403,14 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
     region = config["aws"]["region"]
     all_success = True
 
-    # Steps 1-3: Delete agent stacks
+    # Steps 1-4: Delete agent stacks
     if parallel:
-        # Delete all three agent stacks in parallel
+        # Delete all four agent stacks in parallel
         if not delete_agent_stacks_parallel(config, region):
             print_error("Failed to delete one or more agent stacks")
             all_success = False
     else:
-        # Delete agent stacks sequentially (original behavior)
+        # Delete agent stacks sequentially (original behavior - reverse order)
         # Step 1: Delete Host Agent (reverse order)
         if not delete_stack(config["stacks"]["host_agent"], region, "Host Agent Stack"):
             print_error("Failed to delete Host Agent stack")
@@ -417,7 +418,16 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
 
         print()
 
-        # Step 2: Delete Web Search Agent
+        # Step 2: Delete Echo Ink Agent
+        if not delete_stack(
+            config["stacks"]["echo_ink_agent"], region, "Echo Ink Agent Stack"
+        ):
+            print_error("Failed to delete Echo Ink Agent stack")
+            all_success = False
+
+        print()
+
+        # Step 3: Delete Web Search Agent
         if not delete_stack(
             config["stacks"]["web_search_agent"], region, "Web Search Agent Stack"
         ):
@@ -426,7 +436,7 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
 
         print()
 
-        # Step 3: Delete Monitoring Agent
+        # Step 4: Delete Monitoring Agent
         if not delete_stack(
             config["stacks"]["monitoring_agent"], region, "Monitoring Agent Stack"
         ):
@@ -435,14 +445,14 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
 
     print()
 
-    # Step 4: Delete Cognito Stack
+    # Step 5: Delete Cognito Stack
     if not delete_stack(config["stacks"]["cognito"], region, "Cognito Stack"):
         print_error("Failed to delete Cognito stack")
         all_success = False
 
     print()
 
-    # Step 5: Delete S3 Bucket
+    # Step 6: Delete S3 Bucket
     if not cleanup_s3_bucket(config["s3"]["smithy_models_bucket"], region):
         print_error("Failed to delete S3 bucket")
         all_success = False
@@ -483,12 +493,13 @@ def list_resources(config: Dict[str, Any]):
 
     print(f"{Colors.BOLD}CloudFormation Stacks:{Colors.END}")
     print(f"  1. {config['stacks']['host_agent']} (Host Agent)")
-    print(f"  2. {config['stacks']['web_search_agent']} (Web Search Agent)")
-    print(f"  3. {config['stacks']['monitoring_agent']} (Monitoring Agent)")
-    print(f"  4. {config['stacks']['cognito']} (Cognito)")
+    print(f"  2. {config['stacks']['echo_ink_agent']} (Echo Ink Agent)")
+    print(f"  3. {config['stacks']['web_search_agent']} (Web Search Agent)")
+    print(f"  4. {config['stacks']['monitoring_agent']} (Monitoring Agent)")
+    print(f"  5. {config['stacks']['cognito']} (Cognito)")
 
     print(f"\n{Colors.BOLD}S3 Resources:{Colors.END}")
-    print(f"  5. {config['s3']['smithy_models_bucket']} (S3 Bucket + Contents)")
+    print(f"  6. {config['s3']['smithy_models_bucket']} (S3 Bucket + Contents)")
 
     print(f"\n{Colors.BOLD}Region:{Colors.END} {config['aws']['region']}")
     print()

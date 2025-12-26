@@ -36,6 +36,12 @@ WEBSEARCH_AGENT_ARN = (
     f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{WEBSEARCH_AGENT_ID}"
 )
 
+ECHOINK_AGENT_ID = get_ssm_parameter("/echoinkagent/agentcore/runtime-id")
+ECHOINK_PROVIDER_NAME = get_ssm_parameter("/echoinkagent/agentcore/provider-name")
+ECHOINK_AGENT_ARN = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{ECHOINK_AGENT_ID}"
+)
+
 
 class A2AAgentTool:
     """A2A Agent Tool for communicating with remote agents via A2A protocol"""
@@ -156,7 +162,12 @@ class HostAgent:
             f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
             f"{quote(WEBSEARCH_AGENT_ARN, safe='')}/invocations"
         )
-        
+
+        echoink_agent_url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{quote(ECHOINK_AGENT_ARN, safe='')}/invocations"
+        )
+
         self.monitor_tool = A2AAgentTool(
             agent_url=monitor_agent_url,
             agent_name="monitor_agent",
@@ -164,11 +175,19 @@ class HostAgent:
             session_id=session_id,
             actor_id=actor_id
         )
-        
+
         self.websearch_tool = A2AAgentTool(
             agent_url=websearch_agent_url,
-            agent_name="websearch_agent", 
+            agent_name="websearch_agent",
             provider_name=WEBSEARCH_PROVIDER_NAME,
+            session_id=session_id,
+            actor_id=actor_id
+        )
+
+        self.echoink_tool = A2AAgentTool(
+            agent_url=echoink_agent_url,
+            agent_name="echoink_agent",
+            provider_name=ECHOINK_PROVIDER_NAME,
             session_id=session_id,
             actor_id=actor_id
         )
@@ -184,7 +203,8 @@ class HostAgent:
             model=bedrock_model,
             tools=[
                 self._create_monitor_tool(),
-                self._create_websearch_tool()
+                self._create_websearch_tool(),
+                self._create_echoink_tool()
             ]
         )
         
@@ -215,16 +235,34 @@ class HostAgent:
             """
             Delegate web search tasks to find AWS troubleshooting guides, documentation, and solutions.
             Use for error resolution steps, best practices, and architectural guidance.
-            
+
             Args:
                 message: The search query or research task to delegate
-                
+
             Returns:
                 Response from the web search agent
             """
             return await self.websearch_tool.call_agent(message)
-        
+
         return websearch_agent
+
+    def _create_echoink_tool(self):
+        """Create the echo ink agent tool"""
+        @tool
+        async def echoink_agent(message: str) -> str:
+            """
+            Delegate educational document creation tasks to the Echo Ink agent.
+            Use for creating course materials, lesson plans, assessments, and educational content.
+
+            Args:
+                message: The document creation request or educational content task to delegate
+
+            Returns:
+                Response from the Echo Ink agent
+            """
+            return await self.echoink_tool.call_agent(message)
+
+        return echoink_agent
 
     async def stream(self, query: str):
         """Stream response from the agent"""
@@ -278,6 +316,9 @@ async def get_agent_and_card(session_id: str, actor_id: str):
         },
         "websearch_agent": {
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(WEBSEARCH_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
+        },
+        "echoink_agent": {
+            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOINK_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         }
     }
     

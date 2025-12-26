@@ -418,6 +418,7 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
         "cognito": ("Cognito Stack Name", "cognito-stack-a2a"),
         "monitoring_agent": ("Monitoring Agent Stack Name", "monitor-agent-a2a"),
         "web_search_agent": ("Web Search Agent Stack Name", "web-search-agent-a2a"),
+        "echo_ink_agent": ("Echo Ink Agent Stack Name", "echo-ink-agent-a2a"),
         "host_agent": ("Host Agent Stack Name", "host-agent-a2a"),
     }
 
@@ -617,6 +618,7 @@ def display_configuration(config: Dict[str, Any]):
     print(f"  Cognito: {config['stacks']['cognito']}")
     print(f"  Monitoring Agent: {config['stacks']['monitoring_agent']}")
     print(f"  Web Search Agent: {config['stacks']['web_search_agent']}")
+    print(f"  Echo Ink Agent: {config['stacks']['echo_ink_agent']}")
     print(f"  Host Agent: {config['stacks']['host_agent']}")
 
     print(f"\n{Colors.BOLD}Cognito Configuration:{Colors.END}")
@@ -928,9 +930,26 @@ def deploy_web_search_agent(config: Dict[str, Any]) -> bool:
     )
 
 
+def deploy_echo_ink_agent(config: Dict[str, Any]) -> bool:
+    """Deploy Echo Ink Agent CloudFormation stack"""
+    print_header("Step 4: Deploy Echo Ink Agent")
+
+    return deploy_stack(
+        stack_name=config["stacks"]["echo_ink_agent"],
+        template_file="cloudformation/echo_ink_agent.yaml",
+        parameters=[
+            f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
+            f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
+            f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
+        ],
+        region=config["aws"]["region"],
+        bucket_name=config["s3"]["smithy_models_bucket"],
+    )
+
+
 def deploy_host_agent(config: Dict[str, Any]) -> bool:
     """Deploy Host Agent CloudFormation stack"""
-    print_header("Step 4: Deploy Host Agent")
+    print_header("Step 5: Deploy Host Agent")
 
     return deploy_stack(
         stack_name=config["stacks"]["host_agent"],
@@ -972,9 +991,9 @@ def deploy_agent_parallel(
 
 
 def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
-    """Deploy all three agent stacks in parallel"""
-    print_header("Steps 2-4: Deploy Agent Stacks (Parallel)")
-    print_info("Deploying Monitoring, Web Search, and Host agents in parallel...")
+    """Deploy all four agent stacks in parallel"""
+    print_header("Steps 2-5: Deploy Agent Stacks (Parallel)")
+    print_info("Deploying Monitoring, Web Search, Echo Ink, and Host agents in parallel...")
     print_warning("This is faster but may produce interleaved output\n")
 
     # Prepare deployment tasks
@@ -1005,6 +1024,17 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
             ],
         ),
         (
+            "Echo Ink Agent",
+            config,
+            "echo_ink_agent",
+            "cloudformation/echo_ink_agent.yaml",
+            [
+                f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
+                f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
+                f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
+            ],
+        ),
+        (
             "Host Agent",
             config,
             "host_agent",
@@ -1019,7 +1049,7 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
 
     # Deploy agents in parallel using ThreadPoolExecutor
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all deployment tasks
         future_to_agent = {
             executor.submit(deploy_agent_parallel, *task): task[0] for task in tasks
@@ -1104,11 +1134,11 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
 
     print()
 
-    # Steps 2-4: Deploy agent stacks
+    # Steps 2-5: Deploy agent stacks
     if parallel:
-        # Deploy all three agents in parallel
+        # Deploy all four agents in parallel
         if not deploy_agents_parallel(config):
-            print_error("Failed at Steps 2-4: Agent stack deployments")
+            print_error("Failed at Steps 2-5: Agent stack deployments")
             print_cleanup_instructions()
             return False
     else:
@@ -1129,9 +1159,17 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
 
         print()
 
-        # Step 4: Deploy Host Agent
+        # Step 4: Deploy Echo Ink Agent
+        if not deploy_echo_ink_agent(config):
+            print_error("Failed at Step 4: Echo Ink Agent deployment")
+            print_cleanup_instructions()
+            return False
+
+        print()
+
+        # Step 5: Deploy Host Agent
         if not deploy_host_agent(config):
-            print_error("Failed at Step 4: Host Agent deployment")
+            print_error("Failed at Step 5: Host Agent deployment")
             print_cleanup_instructions()
             return False
 
