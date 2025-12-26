@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: "Host Agent Runtime - Strands-based agent for multi-agent incident response orchestration with Bedrock integration"
+Description: "Echo Ink Agent Runtime - Strands-based educational document creation agent with semantic memory"
 
 Parameters:
   BedrockModelId:
@@ -15,7 +15,7 @@ Parameters:
   AgentDirectory:
     Type: String
     Description: Agent directory with Dockerfile of agent
-    Default: host_strands_agent
+    Default: echo_ink_agent
 
   CognitoStackName:
     Type: String
@@ -114,6 +114,24 @@ Resources:
                   # TODO: Scope down
                 Resource:
                   - '*'
+              - Sid: MemoryAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:ListMemories
+                  - bedrock-agentcore:ListMemoryRecords
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                  - bedrock-agentcore:GetMemory
+                  - bedrock-agentcore:GetMemoryRecord
+                  - bedrock-agentcore:BatchCreateMemoryRecords
+                  - bedrock-agentcore:BatchDeleteMemoryRecords
+                  - bedrock-agentcore:BatchUpdateMemoryRecords
+                  - bedrock-agentcore:ListActors
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:GetEvent
+                Resource:
+                  - !GetAtt AgentMemory.MemoryArn
+                  - !Sub '${AgentMemory.MemoryArn}/*'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Runtime-Role'
@@ -488,7 +506,15 @@ Resources:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                 Resource: !GetAtt AgentDockerBuildProject.Arn
-        # Note: Host agent now uses WebUserPoolClient (public client, no secret needed)
+        - PolicyName: SecretsManagerAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  Fn::ImportValue: !Sub '${CognitoStackName}-EchoInkClientSecretArn'
         - PolicyName: BedrockIdentityAccessPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -555,6 +581,10 @@ Resources:
       Environment:
         Variables:
           CODEBUILD_PROJECT_NAME: !Ref AgentDockerBuildProject
+          AGENT_CLIENT_SECRET_ARN:
+            Fn::ImportValue: !Sub '${CognitoStackName}-EchoInkClientSecretArn'
+          DISCOVERY_URL:
+            Fn::ImportValue: !Sub '${CognitoStackName}-DiscoveryUrl'
           ECR_REPOSITORY_NAME: !Ref AgentECRRepository
       Code:
         ZipFile: |
@@ -567,6 +597,44 @@ Resources:
 
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
+
+          def create_oauth2_credential_provider(secret_arn, discovery_url, provider_name):
+              try:
+                  logger.info(f"Creating OAuth2 credential provider for Agent: {provider_name}")
+
+                  # Get client credentials from Secrets Manager
+                  secrets_client = boto3.client('secretsmanager')
+                  secret_response = secrets_client.get_secret_value(SecretId=secret_arn)
+                  secret_data = json.loads(secret_response['SecretString'])
+
+                  client_id = secret_data['client_id']
+                  client_secret = secret_data['client_secret']
+                  token_url = secret_data['token_endpoint']
+                  auth_url = discovery_url.replace('/.well-known/openid-configuration', '/oauth2/authorize')
+
+                  # Create OAuth2 credential provider
+                  identity_client = boto3.client("bedrock-agentcore-control",)
+
+                  identity_client.create_oauth2_credential_provider(
+                      name=provider_name,
+                      credentialProviderVendor="CustomOauth2",
+                      oauth2ProviderConfigInput={
+                          "customOauth2ProviderConfig": {
+                              "clientId": client_id,
+                              "clientSecret": client_secret,
+                              "oauthDiscovery": {
+                                "discoveryUrl": discovery_url
+                              },
+                          }
+                      },
+                  )
+
+                  logger.info(f"OAuth2 credential provider created: {provider_name}")
+                  return provider_name
+
+              except Exception as e:
+                  logger.error(f"Failed to create OAuth2 credential provider: {str(e)}")
+                  raise e
 
           def empty_ecr_repository(repository_name):
               try:
@@ -600,9 +668,14 @@ Resources:
 
                   request_type = event['RequestType']
                   project_name = os.environ['CODEBUILD_PROJECT_NAME']
+                  agent_client_secret_arn = os.environ['AGENT_CLIENT_SECRET_ARN']
+                  discovery_url = os.environ['DISCOVERY_URL']
+                  provider_name = event['ResourceProperties']['ProviderName']
                   ecr_repository_name = os.environ['ECR_REPOSITORY_NAME']
 
                   if request_type == 'Create':
+                      # Create OAuth2 credential provider first
+                      create_oauth2_credential_provider(agent_client_secret_arn, discovery_url, provider_name)
                       # Start CodeBuild project on stack creation and wait for completion
                       codebuild = boto3.client('codebuild')
 
@@ -656,6 +729,15 @@ Resources:
                       # Clean up ECR repository
                       empty_ecr_repository(ecr_repository_name)
 
+                      # Clean up OAuth2 credential provider
+                      try:
+                          identity_client = boto3.client("bedrock-agentcore-control",)
+                          identity_client.delete_oauth2_credential_provider(name=provider_name)
+                          logger.info(f"OAuth2 credential provider deleted: {provider_name}")
+                      except Exception as e:
+                          logger.error(f"Failed to delete OAuth2 credential provider: {str(e)}")
+                          # Continue with deletion even if provider cleanup fails
+
                       send_response(event, context, 'SUCCESS', {})
 
                   elif request_type == 'Update':
@@ -694,6 +776,120 @@ Resources:
     DependsOn: AgentDockerBuildProject
     Properties:
       ServiceToken: !GetAtt CodeBuildTriggerFunction.Arn
+      ProviderName: !Sub 'AgentOAuth2Provider-${AWS::StackName}'
+
+  # IAM Role for Memory Execution (required for Custom Memory Strategies)
+  MemoryExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref AWS::AccountId
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: MemoryBedrockModelAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Memory-Execution-Role'
+
+  AgentMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Properties:
+      EventExpiryDuration: 60
+      Name: !Join ['', !Split ['-', !Sub '${AWS::StackName}Memory']]
+      MemoryExecutionRoleArn: !GetAtt MemoryExecutionRole.Arn
+      MemoryStrategies:
+        - CustomMemoryStrategy:
+            Name: DocumentSessionTracker
+            Namespaces:
+              - "/document-sessions/{actorId}"
+            Configuration:
+              SemanticOverride:
+                Extraction:
+                  AppendToPrompt: |
+                    Human: You are a specialized memory extraction agent for an educational document creation AI. Your task is to identify and extract:
+
+                    1. Document creation preferences and patterns (formatting styles, content structures)
+                    2. Field-level edits and modifications made to documents
+                    3. Educational content topics and subject areas
+                    4. Session-specific document states and progress
+                    5. User preferences for document types and templates
+                    6. Previous document versions and their evolution
+
+                    Only extract information that is explicitly stated by the user. Do not infer or guess information.
+                    Focus on extracting factual details about document creation sessions that would be useful for future sessions.
+                    Ignore casual conversation, greetings, or non-document-related information.
+
+                    Pay special attention to:
+                    - Document field names and their values
+                    - Formatting preferences and style choices
+                    - Content organization patterns
+                    - Educational standards or requirements mentioned
+                    - Template selections and customizations
+                    - Document finalization decisions
+
+                    IMPORTANT: Extract any information that might be helpful for maintaining document session state and user preferences.
+
+                    Format each extracted fact as a clear, concise statement that could be used to restore document state or inform future document creation.
+                    Assistant:
+                  ModelId: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+                Consolidation:
+                  AppendToPrompt: |
+                    Human: You are a document session knowledge manager responsible for maintaining coherent educational document creation state.
+
+                    When consolidating document memories:
+                    - Prioritize the most recent document state and field values
+                    - Preserve the chronological sequence of edits and modifications
+                    - Maintain relationships between document fields and their content
+                    - Keep distinct separation between different document sessions
+                    - Preserve user formatting preferences and style choices
+                    - Update document progress while maintaining version history
+                    - Merge related edits while preserving the complete timeline
+                    - Maintain clear connections between user preferences and document outcomes
+
+                    For document creation contexts, maintain precision in:
+                    - Field names and their current values
+                    - Document structure and organization
+                    - User-specified educational standards
+                    - Template choices and customizations
+
+                    When updating existing memories with new information:
+                    - Update field values while preserving edit history
+                    - Append new document sections while maintaining structure
+                    - Add new preferences to existing user profiles
+                    - Create separate memories for distinct document sessions
+
+                    The document knowledge base must support session restoration and personalized document creation experiences.
+                    Assistant:
+                  ModelId: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+        - SemanticMemoryStrategy:
+            Name: SemanticMemory
+            Namespaces:
+              - "/knowledge/{actorId}"
+        - UserPreferenceMemoryStrategy:
+            Name: UserPreference
+            Namespaces:
+              - "/users/{actorId}"
+      Tags:
+        Name: !Sub '${AWS::StackName}-Agent-Memory'
+
 
   # BedrockAgentCore Runtime using build-1 ECR image (first build from CodeBuildTrigger)
   AgentRuntime:
@@ -707,19 +903,20 @@ Resources:
       AgentRuntimeArtifact:
         ContainerConfiguration:
           ContainerUri: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AgentECRRepository}:build-1'
-      ProtocolConfiguration: HTTP
+      ProtocolConfiguration: A2A
       RequestHeaderConfiguration :
-        RequestHeaderAllowlist: 
+        RequestHeaderAllowlist:
           - X-Amzn-Bedrock-AgentCore-Runtime-Custom-Actorid
       AuthorizerConfiguration:
         CustomJWTAuthorizer:
           DiscoveryUrl:
             Fn::ImportValue: !Sub '${CognitoStackName}-DiscoveryUrl'
           AllowedClients:
-            - Fn::ImportValue: !Sub '${CognitoStackName}-WebUserPoolClientId'
+            - Fn::ImportValue: !Sub '${CognitoStackName}-EchoInkClientId'
       EnvironmentVariables:
         BEDROCK_MODEL_ID: !Ref BedrockModelId
         MCP_REGION: !Sub '${AWS::Region}'
+        MEMORY_ID: !GetAtt AgentMemory.MemoryId
       Tags:
         Name: !Sub '${AWS::StackName}-Agent-Runtime'
 
@@ -979,7 +1176,7 @@ Resources:
   AgentRuntimeIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: '/hostagent/agentcore/runtime-id'
+      Name: '/echoinkagent/agentcore/runtime-id'
       Description: 'BedrockAgentCore Runtime ID'
       Type: String
       Value: !GetAtt AgentRuntime.AgentRuntimeId
@@ -990,10 +1187,10 @@ Resources:
   AgentProviderNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: '/hostagent/agentcore/provider-name'
+      Name: '/echoinkagent/agentcore/provider-name'
       Description: 'OAuth2 Credential Provider Name'
       Type: String
-      Value: !Sub 'HostAgentOAuth2Provider-${AWS::StackName}'
+      Value: !Sub 'AgentOAuth2Provider-${AWS::StackName}'
       Tags:
         Name: !Sub '${AWS::StackName}-ProviderName-Parameter'
 
@@ -1018,6 +1215,6 @@ Outputs:
 
   AgentProviderName:
     Description: 'Name of the Agent provider'
-    Value: !Sub 'HostAgentOAuth2Provider-${AWS::StackName}'
+    Value: !Sub 'AgentOAuth2Provider-${AWS::StackName}'
     Export:
       Name: !Sub '${AWS::StackName}-AgentProviderName'

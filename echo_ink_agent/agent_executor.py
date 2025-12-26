@@ -12,31 +12,31 @@ from a2a.utils import new_agent_text_message, new_task
 from a2a.utils.errors import ServerError
 import logging
 import os
-from agent import MonitoringAgent
+from agent import EchoInkAgent
 
 logger = logging.getLogger(__name__)
 
 
-class MonitoringAgentExecutor(AgentExecutor):
+class EchoInkAgentExecutor(AgentExecutor):
     """
-    Agent executor for the Strands-based monitoring agent
+    Agent executor for the Echo Ink educational document creation agent
     """
 
     def __init__(self):
         """Initialize the executor"""
         self._agent = None
         self._active_tasks = {}
-        logger.info("MonitoringAgentExecutor initialized")
+        logger.info("EchoInkAgentExecutor initialized")
 
-    async def _get_agent(self, session_id: str, actor_id: str, workload_token: str):
+    async def _get_agent(self, session_id: str, actor_id: str):
         """Get or create the agent instance"""
         if self._agent is None:
-            logger.info("Creating monitoring agent...")
+            logger.info("Creating Echo Ink agent...")
 
             # Get configuration from environment
             memory_id = os.getenv("MEMORY_ID")
             model_id = os.getenv(
-                "MODEL_ID", "global.anthropic.claude-sonnet-4-20250514-v1:0"
+                "BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
             )
             region_name = os.getenv("MCP_REGION")
 
@@ -46,15 +46,14 @@ class MonitoringAgentExecutor(AgentExecutor):
                 )
 
             # Create agent instance
-            self._agent = MonitoringAgent(
+            self._agent = EchoInkAgent(
                 memory_id=memory_id,
                 model_id=model_id,
                 region_name=region_name,
                 actor_id=actor_id,
                 session_id=session_id,
-                workload_token=workload_token,
             )
-            logger.info("Monitoring agent created successfully")
+            logger.info("Echo Ink agent created successfully")
 
         return self._agent
 
@@ -121,15 +120,11 @@ class MonitoringAgentExecutor(AgentExecutor):
         # Extract required headers
         session_id = None
         actor_id = None
-        workload_token = None
 
         if context.call_context:
             headers = context.call_context.state.get("headers", {})
             session_id = headers.get("x-amzn-bedrock-agentcore-runtime-session-id")
             actor_id = headers.get("x-amzn-bedrock-agentcore-runtime-custom-actorid")
-            workload_token = headers.get(
-                "x-amzn-bedrock-agentcore-runtime-workload-accesstoken"
-            )
 
         if not actor_id:
             logger.error("Actor ID is not set")
@@ -137,10 +132,6 @@ class MonitoringAgentExecutor(AgentExecutor):
 
         if not session_id:
             logger.error("Session ID is not set")
-            raise ServerError(error=InvalidParamsError())
-
-        if not workload_token:
-            logger.error("Workload token is not set")
             raise ServerError(error=InvalidParamsError())
 
         # Get or create task
@@ -165,7 +156,7 @@ class MonitoringAgentExecutor(AgentExecutor):
             logger.info(f"User message: '{user_message}'")
 
             # Get the agent instance
-            agent = await self._get_agent(session_id, actor_id, workload_token)
+            agent = await self._get_agent(session_id, actor_id)
 
             # Mark task as active
             self._active_tasks[task_id] = True
