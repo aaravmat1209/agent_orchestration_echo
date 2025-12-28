@@ -30,12 +30,6 @@ MONITOR_AGENT_ARN = (
     f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{MONITOR_AGENT_ID}"
 )
 
-WEBSEARCH_AGENT_ID = get_ssm_parameter("/websearchagent/agentcore/runtime-id")
-WEBSEARCH_PROVIDER_NAME = get_ssm_parameter("/websearchagent/agentcore/provider-name")
-WEBSEARCH_AGENT_ARN = (
-    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{WEBSEARCH_AGENT_ID}"
-)
-
 ECHOINK_AGENT_ID = get_ssm_parameter("/echoinkagent/agentcore/runtime-id")
 ECHOINK_PROVIDER_NAME = get_ssm_parameter("/echoinkagent/agentcore/provider-name")
 ECHOINK_AGENT_ARN = (
@@ -163,11 +157,6 @@ class HostAgent:
             f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
             f"{quote(MONITOR_AGENT_ARN, safe='')}/invocations"
         )
-        
-        websearch_agent_url = (
-            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-            f"{quote(WEBSEARCH_AGENT_ARN, safe='')}/invocations"
-        )
 
         echoink_agent_url = (
             f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
@@ -183,14 +172,6 @@ class HostAgent:
             agent_url=monitor_agent_url,
             agent_name="monitor_agent",
             provider_name=MONITOR_PROVIDER_NAME,
-            session_id=session_id,
-            actor_id=actor_id
-        )
-
-        self.websearch_tool = A2AAgentTool(
-            agent_url=websearch_agent_url,
-            agent_name="websearch_agent",
-            provider_name=WEBSEARCH_PROVIDER_NAME,
             session_id=session_id,
             actor_id=actor_id
         )
@@ -222,7 +203,6 @@ class HostAgent:
             model=bedrock_model,
             tools=[
                 self._create_monitor_tool(),
-                self._create_websearch_tool(),
                 self._create_echoink_tool(),
                 self._create_echoprepare_tool()
             ]
@@ -247,24 +227,6 @@ class HostAgent:
             return await self.monitor_tool.call_agent(message)
         
         return monitor_agent
-
-    def _create_websearch_tool(self):
-        """Create the websearch agent tool"""
-        @tool
-        async def websearch_agent(message: str) -> str:
-            """
-            Delegate web search tasks to find AWS troubleshooting guides, documentation, and solutions.
-            Use for error resolution steps, best practices, and architectural guidance.
-
-            Args:
-                message: The search query or research task to delegate
-
-            Returns:
-                Response from the web search agent
-            """
-            return await self.websearch_tool.call_agent(message)
-
-        return websearch_agent
 
     def _create_echoink_tool(self):
         """Create the echo ink agent tool"""
@@ -352,9 +314,6 @@ async def get_agent_and_card(session_id: str, actor_id: str):
     agents_cards = {
         "monitor_agent": {
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(MONITOR_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
-        },
-        "websearch_agent": {
-            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(WEBSEARCH_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         },
         "echoink_agent": {
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOINK_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"

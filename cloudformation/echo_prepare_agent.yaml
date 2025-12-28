@@ -247,7 +247,6 @@ Resources:
                 - pwd
                 - ls -la
                 - echo "Navigating to agent directory..."
-                - cd 02-use-cases/A2A-multi-agent-incident-response/
                 - cd ${AGENT_DIRECTORY}
                 - echo "Contents of agent directory:"
                 - ls -la
@@ -805,6 +804,7 @@ Resources:
                   - bedrock:InvokeModelWithResponseStream
                 Resource:
                   - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Memory-Execution-Role'
@@ -820,7 +820,6 @@ Resources:
             Name: StudySessionTracker
             Namespaces:
               - "/study-sessions/{actorId}"
-              - "/confidence-tracking/{actorId}"
             Configuration:
               SemanticOverride:
                 Extraction:
@@ -1181,7 +1180,7 @@ Resources:
   AgentRuntimeIdParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: '/echoinkagent/agentcore/runtime-id'
+      Name: '/echoprepareagent/agentcore/runtime-id'
       Description: 'BedrockAgentCore Runtime ID'
       Type: String
       Value: !GetAtt AgentRuntime.AgentRuntimeId
@@ -1192,7 +1191,7 @@ Resources:
   AgentProviderNameParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: '/echoinkagent/agentcore/provider-name'
+      Name: '/echoprepareagent/agentcore/provider-name'
       Description: 'OAuth2 Credential Provider Name'
       Type: String
       Value: !Sub 'AgentOAuth2Provider-${AWS::StackName}'

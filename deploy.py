@@ -416,8 +416,6 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
 
     stack_names = {
         "cognito": ("Cognito Stack Name", "cognito-stack-a2a"),
-        "monitoring_agent": ("Monitoring Agent Stack Name", "monitor-agent-a2a"),
-        "web_search_agent": ("Web Search Agent Stack Name", "web-search-agent-a2a"),
         "echo_ink_agent": ("Echo Ink Agent Stack Name", "echo-ink-agent-a2a"),
         "echo_prepare_agent": ("Echo Prepare Agent Stack Name", "echo-prepare-agent-a2a"),
         "host_agent": ("Host Agent Stack Name", "host-agent-a2a"),
@@ -539,20 +537,20 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
             default=(
                 existing_config.get("github", {}).get(
                     "url",
-                    "https://github.com/awslabs/amazon-bedrock-agentcore-samples.git",
+                    "https://github.com/aaravmat1209/agent_orchestration_echo.git",
                 )
                 if use_existing
-                else "https://github.com/awslabs/amazon-bedrock-agentcore-samples.git"
+                else "https://github.com/aaravmat1209/agent_orchestration_echo.git"
             ),
             required=True,
         ),
         # Agent directories are taken from CloudFormation defaults - not configurable
-        "monitoring_agent_directory": "monitoring_agent",
-        "web_search_agent_directory": "web_search_openai_agents",
+        "echo_ink_agent_directory": "echo_ink_agent",
+        "echo_prepare_agent_directory": "echo_prepare_agent",
         "host_agent_directory": "host_strands_agent",
     }
     print_info(
-        "Agent directories will use CloudFormation defaults (monitoring_agent, web_search_openai_agents, host_strands_agent)"
+        "Agent directories will use CloudFormation defaults (echo_ink_agent, echo_prepare_agent, host_strands_agent)"
     )
 
     # API Keys
@@ -572,19 +570,7 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
 
     if ask_for_keys:
         config["api_keys"] = {
-            "openai": get_secret("OpenAI API Key", required=True),
-            "openai_model": get_input(
-                "OpenAI Model ID",
-                default=(
-                    existing_config.get("api_keys", {}).get(
-                        "openai_model", "gpt-4o-2024-08-06"
-                    )
-                    if use_existing
-                    else "gpt-4o-2024-08-06"
-                ),
-                required=True,
-            ),
-            "tavily": get_secret("Tavily API Key", required=True),
+            "tavily": get_secret("Tavily API Key (for Echo Prepare agent)", required=True),
         }
     else:
         config["api_keys"] = existing_config.get("api_keys", {})
@@ -617,9 +603,8 @@ def display_configuration(config: Dict[str, Any]):
 
     print(f"\n{Colors.BOLD}CloudFormation Stacks:{Colors.END}")
     print(f"  Cognito: {config['stacks']['cognito']}")
-    print(f"  Monitoring Agent: {config['stacks']['monitoring_agent']}")
-    print(f"  Web Search Agent: {config['stacks']['web_search_agent']}")
     print(f"  Echo Ink Agent: {config['stacks']['echo_ink_agent']}")
+    print(f"  Echo Prepare Agent: {config['stacks']['echo_prepare_agent']}")
     print(f"  Host Agent: {config['stacks']['host_agent']}")
 
     print(f"\n{Colors.BOLD}Cognito Configuration:{Colors.END}")
@@ -635,12 +620,11 @@ def display_configuration(config: Dict[str, Any]):
 
     print(f"\n{Colors.BOLD}GitHub Configuration:{Colors.END}")
     print(f"  Repository URL: {config['github']['url']}")
-    print(f"  Monitoring Agent Dir: {config['github']['monitoring_agent_directory']}")
-    print(f"  Web Search Agent Dir: {config['github']['web_search_agent_directory']}")
+    print(f"  Echo Ink Agent Dir: {config['github']['echo_ink_agent_directory']}")
+    print(f"  Echo Prepare Agent Dir: {config['github']['echo_prepare_agent_directory']}")
     print(f"  Host Agent Dir: {config['github']['host_agent_directory']}")
 
     print(f"\n{Colors.BOLD}API Keys:{Colors.END}")
-    print(f"  OpenAI API Key: {'*' * 20} (configured)")
     print(f"  Tavily API Key: {'*' * 20} (configured)")
 
     print(f"\n{Colors.BOLD}Host Agent Configuration:{Colors.END}")
@@ -721,9 +705,9 @@ def wait_for_stack(
     return False
 
 
-def create_s3_bucket_and_upload(config: Dict[str, Any]) -> bool:
-    """Create S3 bucket and upload Smithy model"""
-    print_header("Step 0: Create S3 Bucket and Upload Smithy Model")
+def create_s3_bucket(config: Dict[str, Any]) -> bool:
+    """Create S3 bucket for CloudFormation templates"""
+    print_header("Step 0: Create S3 Bucket for CloudFormation Templates")
 
     bucket_name = config["s3"]["smithy_models_bucket"]
     region = config["aws"]["region"]
@@ -731,44 +715,19 @@ def create_s3_bucket_and_upload(config: Dict[str, Any]) -> bool:
     # Check if bucket already exists
     if check_s3_bucket_exists(bucket_name, region):
         print_info(f"Bucket '{bucket_name}' already exists, skipping creation")
-    else:
-        print_info(f"Creating S3 bucket: {bucket_name}")
-        success, output = run_command(
-            ["aws", "s3", "mb", f"s3://{bucket_name}", "--region", region]
-        )
+        return True
 
-        if success:
-            print_success(f"S3 bucket '{bucket_name}' created successfully!")
-        else:
-            print_error(f"Failed to create S3 bucket: {output}")
-            return False
-
-    # Upload Smithy model
-    smithy_model_path = "cloudformation/smithy-models/monitoring-service.json"
-    s3_key = "smithy-models/monitoring-service.json"
-
-    if not Path(smithy_model_path).exists():
-        print_error(f"Smithy model file not found: {smithy_model_path}")
-        return False
-
-    print_info(f"Uploading Smithy model to s3://{bucket_name}/{s3_key}")
+    print_info(f"Creating S3 bucket: {bucket_name}")
     success, output = run_command(
-        [
-            "aws",
-            "s3",
-            "cp",
-            smithy_model_path,
-            f"s3://{bucket_name}/{s3_key}",
-            "--region",
-            region,
-        ]
+        ["aws", "s3", "mb", f"s3://{bucket_name}", "--region", region],
+        timeout=30
     )
 
     if success:
-        print_success("Smithy model uploaded successfully!")
+        print_success(f"S3 bucket '{bucket_name}' created successfully!")
         return True
     else:
-        print_error(f"Failed to upload Smithy model: {output}")
+        print_error(f"Failed to create S3 bucket: {output}")
         return False
 
 
@@ -894,46 +853,12 @@ def deploy_cognito_stack(config: Dict[str, Any]) -> bool:
     )
 
 
-def deploy_monitoring_agent(config: Dict[str, Any]) -> bool:
-    """Deploy Monitoring Agent CloudFormation stack"""
-    print_header("Step 2: Deploy Monitoring Agent")
 
-    return deploy_stack(
-        stack_name=config["stacks"]["monitoring_agent"],
-        template_file="cloudformation/monitoring_agent.yaml",
-        parameters=[
-            f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
-            f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
-            f"ParameterKey=SmithyModelS3Bucket,ParameterValue={config['s3']['smithy_models_bucket']}",
-            f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
-        ],
-        region=config["aws"]["region"],
-        bucket_name=config["s3"]["smithy_models_bucket"],
-    )
-
-
-def deploy_web_search_agent(config: Dict[str, Any]) -> bool:
-    """Deploy Web Search Agent CloudFormation stack"""
-    print_header("Step 3: Deploy Web Search Agent")
-
-    return deploy_stack(
-        stack_name=config["stacks"]["web_search_agent"],
-        template_file="cloudformation/web_search_agent.yaml",
-        parameters=[
-            f"ParameterKey=OpenAIKey,ParameterValue={config['api_keys']['openai']}",
-            f"ParameterKey=OpenAIModelId,ParameterValue={config['api_keys']['openai_model']}",
-            f"ParameterKey=TavilyAPIKey,ParameterValue={config['api_keys']['tavily']}",
-            f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
-            f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
-        ],
-        region=config["aws"]["region"],
-        bucket_name=config["s3"]["smithy_models_bucket"],
-    )
 
 
 def deploy_echo_ink_agent(config: Dict[str, Any]) -> bool:
     """Deploy Echo Ink Agent CloudFormation stack"""
-    print_header("Step 4: Deploy Echo Ink Agent")
+    print_header("Step 3: Deploy Echo Ink Agent")
 
     return deploy_stack(
         stack_name=config["stacks"]["echo_ink_agent"],
@@ -950,7 +875,7 @@ def deploy_echo_ink_agent(config: Dict[str, Any]) -> bool:
 
 def deploy_echo_prepare_agent(config: Dict[str, Any]) -> bool:
     """Deploy Echo Prepare Agent CloudFormation stack"""
-    print_header("Step 5: Deploy Echo Prepare Agent")
+    print_header("Step 4: Deploy Echo Prepare Agent")
 
     return deploy_stack(
         stack_name=config["stacks"]["echo_prepare_agent"],
@@ -967,7 +892,7 @@ def deploy_echo_prepare_agent(config: Dict[str, Any]) -> bool:
 
 def deploy_host_agent(config: Dict[str, Any]) -> bool:
     """Deploy Host Agent CloudFormation stack"""
-    print_header("Step 6: Deploy Host Agent")
+    print_header("Step 5: Deploy Host Agent")
 
     return deploy_stack(
         stack_name=config["stacks"]["host_agent"],
@@ -1011,36 +936,12 @@ def deploy_agent_parallel(
 def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
     """Deploy all four agent stacks in parallel"""
     print_header("Steps 2-5: Deploy Agent Stacks (Parallel)")
-    print_info("Deploying Monitoring, Web Search, Echo Ink, and Host agents in parallel...")
+    print_info("Deploying Echo Ink, Echo Prepare, and Host agents in parallel...")
     print_warning("This is faster but may produce interleaved output\n")
 
     # Prepare deployment tasks
     tasks = [
-        (
-            "Monitoring Agent",
-            config,
-            "monitoring_agent",
-            "cloudformation/monitoring_agent.yaml",
-            [
-                f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
-                f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
-                f"ParameterKey=SmithyModelS3Bucket,ParameterValue={config['s3']['smithy_models_bucket']}",
-                f"ParameterKey=BedrockModelId,ParameterValue={config['aws']['bedrock_model_id']}",
-            ],
-        ),
-        (
-            "Web Search Agent",
-            config,
-            "web_search_agent",
-            "cloudformation/web_search_agent.yaml",
-            [
-                f"ParameterKey=OpenAIKey,ParameterValue={config['api_keys']['openai']}",
-                f"ParameterKey=OpenAIModelId,ParameterValue={config['api_keys']['openai_model']}",
-                f"ParameterKey=TavilyAPIKey,ParameterValue={config['api_keys']['tavily']}",
-                f"ParameterKey=GitHubURL,ParameterValue={config['github']['url']}",
-                f"ParameterKey=CognitoStackName,ParameterValue={config['stacks']['cognito']}",
-            ],
-        ),
+       
         (
             "Echo Ink Agent",
             config,
@@ -1078,7 +979,7 @@ def deploy_agents_parallel(config: Dict[str, Any]) -> bool:
 
     # Deploy agents in parallel using ThreadPoolExecutor
     results = {}
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         # Submit all deployment tasks
         future_to_agent = {
             executor.submit(deploy_agent_parallel, *task): task[0] for task in tasks
@@ -1147,9 +1048,9 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
 
     print_info("You can monitor progress in the AWS CloudFormation console\n")
 
-    # Step 0: Create S3 bucket and upload Smithy model
-    if not create_s3_bucket_and_upload(config):
-        print_error("Failed at Step 0: S3 bucket creation/upload")
+    # Step 0: Create S3 bucket for CloudFormation templates
+    if not create_s3_bucket(config):
+        print_error("Failed at Step 0: S3 bucket creation")
         print_cleanup_instructions()
         return False
 
@@ -1173,24 +1074,21 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
     else:
         # Deploy agents sequentially (original behavior)
         # Step 2: Deploy Monitoring Agent
-        if not deploy_monitoring_agent(config):
-            print_error("Failed at Step 2: Monitoring Agent deployment")
-            print_cleanup_instructions()
-            return False
+
 
         print()
 
-        # Step 3: Deploy Web Search Agent
-        if not deploy_web_search_agent(config):
-            print_error("Failed at Step 3: Web Search Agent deployment")
-            print_cleanup_instructions()
-            return False
-
-        print()
-
-        # Step 4: Deploy Echo Ink Agent
+        # Step 3: Deploy Echo Ink Agent
         if not deploy_echo_ink_agent(config):
-            print_error("Failed at Step 4: Echo Ink Agent deployment")
+            print_error("Failed at Step 3: Echo Ink Agent deployment")
+            print_cleanup_instructions()
+            return False
+
+        print()
+
+        # Step 4: Deploy Echo Prepare Agent
+        if not deploy_echo_prepare_agent(config):
+            print_error("Failed at Step 4: Echo Prepare Agent deployment")
             print_cleanup_instructions()
             return False
 
@@ -1207,7 +1105,7 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
     print_success("All stacks have been deployed successfully!")
     print_info("\nNext steps:")
     print_info(
-        "1. Test individual agents: uv run test/connect_agent.py --agent <monitor|websearch|host>"
+        "1. Test individual agents: uv run test/connect_agent.py --agent <monitor|host>"
     )
     print_info(
         "2. Run the React frontend: cd frontend && npm install && ./setup-env.sh && npm run dev"

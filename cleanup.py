@@ -327,9 +327,9 @@ def delete_stack_parallel(
 
 
 def delete_agent_stacks_parallel(config: Dict[str, Any], region: str) -> bool:
-    """Delete all five agent stacks in parallel"""
-    print_header("Steps 1-5: Delete Agent Stacks (Parallel)")
-    print_info("Deleting Host, Echo Prepare, Echo Ink, Web Search, and Monitoring agent stacks in parallel...")
+    """Delete all four agent stacks in parallel"""
+    print_header("Steps 1-4: Delete Agent Stacks (Parallel)")
+    print_info("Deleting Host, Echo Prepare, Echo Ink agent stacks in parallel...")
     print_warning("This is faster but may produce interleaved output\n")
 
     # Prepare deletion tasks (in reverse dependency order)
@@ -337,13 +337,11 @@ def delete_agent_stacks_parallel(config: Dict[str, Any], region: str) -> bool:
         (config["stacks"]["host_agent"], region, "Host Agent Stack"),
         (config["stacks"]["echo_prepare_agent"], region, "Echo Prepare Agent Stack"),
         (config["stacks"]["echo_ink_agent"], region, "Echo Ink Agent Stack"),
-        (config["stacks"]["web_search_agent"], region, "Web Search Agent Stack"),
-        (config["stacks"]["monitoring_agent"], region, "Monitoring Agent Stack"),
     ]
 
     # Delete stacks in parallel using ThreadPoolExecutor
     results = {}
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all deletion tasks
         future_to_stack = {
             executor.submit(delete_stack_parallel, *task): task[2]
@@ -419,7 +417,16 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
 
         print()
 
-        # Step 2: Delete Echo Ink Agent
+        # Step 2: Delete Echo Prepare Agent
+        if not delete_stack(
+            config["stacks"]["echo_prepare_agent"], region, "Echo Prepare Agent Stack"
+        ):
+            print_error("Failed to delete Echo Prepare Agent stack")
+            all_success = False
+
+        print()
+
+        # Step 3: Delete Echo Ink Agent
         if not delete_stack(
             config["stacks"]["echo_ink_agent"], region, "Echo Ink Agent Stack"
         ):
@@ -428,32 +435,15 @@ def run_cleanup(config: Dict[str, Any], parallel: bool = True) -> bool:
 
         print()
 
-        # Step 3: Delete Web Search Agent
-        if not delete_stack(
-            config["stacks"]["web_search_agent"], region, "Web Search Agent Stack"
-        ):
-            print_error("Failed to delete Web Search Agent stack")
-            all_success = False
 
-        print()
-
-        # Step 4: Delete Monitoring Agent
-        if not delete_stack(
-            config["stacks"]["monitoring_agent"], region, "Monitoring Agent Stack"
-        ):
-            print_error("Failed to delete Monitoring Agent stack")
-            all_success = False
-
-    print()
-
-    # Step 6: Delete Cognito Stack
+    # Step 5: Delete Cognito Stack
     if not delete_stack(config["stacks"]["cognito"], region, "Cognito Stack"):
         print_error("Failed to delete Cognito stack")
         all_success = False
 
     print()
 
-    # Step 7: Delete S3 Bucket
+    # Step 6: Delete S3 Bucket
     if not cleanup_s3_bucket(config["s3"]["smithy_models_bucket"], region):
         print_error("Failed to delete S3 bucket")
         all_success = False
@@ -494,9 +484,8 @@ def list_resources(config: Dict[str, Any]):
 
     print(f"{Colors.BOLD}CloudFormation Stacks:{Colors.END}")
     print(f"  1. {config['stacks']['host_agent']} (Host Agent)")
-    print(f"  2. {config['stacks']['echo_ink_agent']} (Echo Ink Agent)")
-    print(f"  3. {config['stacks']['web_search_agent']} (Web Search Agent)")
-    print(f"  4. {config['stacks']['monitoring_agent']} (Monitoring Agent)")
+    print(f"  2. {config['stacks']['echo_prepare_agent']} (Echo Prepare Agent)")
+    print(f"  3. {config['stacks']['echo_ink_agent']} (Echo Ink Agent)")
     print(f"  5. {config['stacks']['cognito']} (Cognito)")
 
     print(f"\n{Colors.BOLD}S3 Resources:{Colors.END}")

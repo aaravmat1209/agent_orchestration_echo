@@ -229,7 +229,6 @@ Resources:
                 - pwd
                 - ls -la
                 - echo "Navigating to agent directory..."
-                - cd 02-use-cases/A2A-multi-agent-incident-response/
                 - cd ${AGENT_DIRECTORY}
                 - echo "Contents of agent directory:"
                 - ls -la

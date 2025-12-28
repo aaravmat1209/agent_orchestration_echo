@@ -263,7 +263,6 @@ Resources:
                 - pwd
                 - ls -la
                 - echo "Navigating to agent directory..."
-                - cd 02-use-cases/A2A-multi-agent-incident-response/
                 - cd ${AGENT_DIRECTORY}
                 - echo "Contents of agent directory:"
                 - ls -la
@@ -821,6 +820,7 @@ Resources:
                   - bedrock:InvokeModelWithResponseStream
                 Resource:
                   - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-Memory-Execution-Role'
