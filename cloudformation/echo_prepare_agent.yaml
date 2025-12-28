@@ -513,7 +513,7 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  Fn::ImportValue: !Sub '${CognitoStackName}-EchoInkClientSecretArn'
+                  Fn::ImportValue: !Sub '${CognitoStackName}-EchoPrepareClientSecretArn'
         - PolicyName: BedrockIdentityAccessPolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -581,7 +581,7 @@ Resources:
         Variables:
           CODEBUILD_PROJECT_NAME: !Ref AgentDockerBuildProject
           AGENT_CLIENT_SECRET_ARN:
-            Fn::ImportValue: !Sub '${CognitoStackName}-EchoInkClientSecretArn'
+            Fn::ImportValue: !Sub '${CognitoStackName}-EchoPrepareClientSecretArn'
           DISCOVERY_URL:
             Fn::ImportValue: !Sub '${CognitoStackName}-DiscoveryUrl'
           ECR_REPOSITORY_NAME: !Ref AgentECRRepository
