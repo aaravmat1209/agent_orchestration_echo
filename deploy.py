@@ -731,6 +731,48 @@ def create_s3_bucket(config: Dict[str, Any]) -> bool:
         return False
 
 
+def create_tavily_secret(config: Dict[str, Any]) -> bool:
+    """Create Tavily API key secret in AWS Secrets Manager"""
+    print_header("Step 0.5: Create Tavily API Key Secret")
+
+    region = config["aws"]["region"]
+    tavily_key = config["api_keys"]["tavily"]
+    secret_name = "tavily-api-key"
+
+    # Check if secret already exists
+    check_cmd = [
+        "aws", "secretsmanager", "describe-secret",
+        "--secret-id", secret_name,
+        "--region", region
+    ]
+
+    success, output = run_command(check_cmd, timeout=10)
+    if success:
+        print_info(f"Secret '{secret_name}' already exists, skipping creation")
+        return True
+
+    # Create the secret
+    print_info(f"Creating Tavily API key secret in Secrets Manager...")
+    secret_value = json.dumps({"TAVILY_API_KEY": tavily_key})
+
+    create_cmd = [
+        "aws", "secretsmanager", "create-secret",
+        "--name", secret_name,
+        "--description", "Tavily API key for web search",
+        "--secret-string", secret_value,
+        "--region", region
+    ]
+
+    success, output = run_command(create_cmd, timeout=10)
+
+    if success:
+        print_success(f"Tavily API key secret created successfully!")
+        return True
+    else:
+        print_error(f"Failed to create Tavily secret: {output}")
+        return False
+
+
 def upload_template_to_s3(
     template_file: str, bucket_name: str, region: str, thread_safe: bool = False
 ) -> Optional[str]:
@@ -1051,6 +1093,14 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
     # Step 0: Create S3 bucket for CloudFormation templates
     if not create_s3_bucket(config):
         print_error("Failed at Step 0: S3 bucket creation")
+        print_cleanup_instructions()
+        return False
+
+    print()
+
+    # Step 0.5: Create Tavily API key secret
+    if not create_tavily_secret(config):
+        print_error("Failed at Step 0.5: Tavily API key secret creation")
         print_cleanup_instructions()
         return False
 
