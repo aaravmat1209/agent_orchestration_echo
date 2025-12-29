@@ -731,6 +731,82 @@ def create_s3_bucket(config: Dict[str, Any]) -> bool:
         return False
 
 
+def create_echo_docs_bucket(config: Dict[str, Any]) -> bool:
+    """Create S3 bucket for echo-docs (document storage for EchoInk and EchoPrepare agents)"""
+    print_header("Step 0.1: Create S3 Bucket for Document Storage (echo-docs)")
+
+    account_id = config["aws"]["account_id"]
+    region = config["aws"]["region"]
+    bucket_name = f"echo-docs-{account_id}"
+
+    # Check if bucket already exists
+    if check_s3_bucket_exists(bucket_name, region):
+        print_info(f"Bucket '{bucket_name}' already exists, skipping creation")
+        return True
+
+    print_info(f"Creating S3 bucket for document storage: {bucket_name}")
+    success, output = run_command(
+        ["aws", "s3", "mb", f"s3://{bucket_name}", "--region", region],
+        timeout=30
+    )
+
+    if success:
+        print_success(f"S3 bucket '{bucket_name}' created successfully!")
+
+        # Enable versioning for document history
+        print_info("Enabling versioning on echo-docs bucket...")
+        version_cmd = [
+            "aws", "s3api", "put-bucket-versioning",
+            "--bucket", bucket_name,
+            "--versioning-configuration", "Status=Enabled",
+            "--region", region
+        ]
+        version_success, version_output = run_command(version_cmd, timeout=30)
+
+        if version_success:
+            print_success("Versioning enabled on echo-docs bucket")
+        else:
+            print_warning(f"Failed to enable versioning: {version_output}")
+
+        # Add lifecycle policy to clean up old documents after 90 days
+        print_info("Setting lifecycle policy for automatic cleanup...")
+        lifecycle_policy = {
+            "Rules": [{
+                "Id": "DeleteOldDocuments",
+                "Status": "Enabled",
+                "Expiration": {"Days": 90},
+                "NoncurrentVersionExpiration": {"NoncurrentDays": 30}
+            }]
+        }
+
+        import json
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(lifecycle_policy, f)
+            policy_file = f.name
+
+        lifecycle_cmd = [
+            "aws", "s3api", "put-bucket-lifecycle-configuration",
+            "--bucket", bucket_name,
+            "--lifecycle-configuration", f"file://{policy_file}",
+            "--region", region
+        ]
+        lifecycle_success, lifecycle_output = run_command(lifecycle_cmd, timeout=30)
+
+        import os
+        os.unlink(policy_file)
+
+        if lifecycle_success:
+            print_success("Lifecycle policy set (90-day retention)")
+        else:
+            print_warning(f"Failed to set lifecycle policy: {lifecycle_output}")
+
+        return True
+    else:
+        print_error(f"Failed to create S3 bucket: {output}")
+        return False
+
+
 def create_tavily_secret(config: Dict[str, Any]) -> bool:
     """Create Tavily API key secret in AWS Secrets Manager"""
     print_header("Step 0.5: Create Tavily API Key Secret")
@@ -1093,6 +1169,14 @@ def run_deployment(config: Dict[str, Any], parallel: bool = True) -> bool:
     # Step 0: Create S3 bucket for CloudFormation templates
     if not create_s3_bucket(config):
         print_error("Failed at Step 0: S3 bucket creation")
+        print_cleanup_instructions()
+        return False
+
+    print()
+
+    # Step 0.1: Create S3 bucket for document storage (echo-docs)
+    if not create_echo_docs_bucket(config):
+        print_error("Failed at Step 0.1: echo-docs S3 bucket creation")
         print_cleanup_instructions()
         return False
 
