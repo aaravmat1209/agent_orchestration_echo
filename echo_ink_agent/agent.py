@@ -11,6 +11,7 @@ from echo_ink_orchestrator import (
     session_manager_agent,
     initialize_session_storage,
 )
+import document_tools
 
 
 class EchoInkAgent:
@@ -29,6 +30,9 @@ class EchoInkAgent:
 
         # Initialize session storage with AgentCore Memory
         initialize_session_storage(memory_id, memory_client, actor_id)
+
+        # Initialize S3 document storage with session ID
+        document_tools.set_session_id(session_id)
 
         echo_ink_hooks = EchoInkMemoryHooks(
             memory_id=memory_id,

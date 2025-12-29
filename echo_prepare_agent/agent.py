@@ -6,6 +6,7 @@ from strands.models import BedrockModel
 from prompt import SYSTEM_PROMPT
 from memory_tool import create_memory_tools
 from tools import get_prepare_tools
+import document_retrieval
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ class EchoPrepareAgent:
         # Initialize memory client
         memory_client = MemoryClient(region_name=MCP_REGION)
 
+        # Initialize S3 document retrieval with session ID
+        document_retrieval.set_session_id(session_id)
+
         # Get memory tools
         memory_tools = create_memory_tools(
             memory_id=MEMORY_ID,
@@ -49,7 +53,7 @@ class EchoPrepareAgent:
             session_id=session_id,
         )
 
-        # Get study tools (web search + new study tools)
+        # Get study tools (web search + confidence tracking)
         study_tools = get_prepare_tools(
             memory_id=MEMORY_ID,
             memory_client=memory_client,
@@ -57,10 +61,13 @@ class EchoPrepareAgent:
             session_id=session_id,
         )
 
-        # Combine all tools
-        all_tools = study_tools + memory_tools
+        # Get document retrieval tools (read-only access to instructor materials)
+        retrieval_tools = document_retrieval.get_document_retrieval_tools()
 
-        logger.info(f"Initializing Echo Prepare Agent with {len(all_tools)} tools")
+        # Combine all tools
+        all_tools = study_tools + memory_tools + retrieval_tools
+
+        logger.info(f"Initializing Echo Prepare Agent with {len(all_tools)} tools (including {len(retrieval_tools)} document retrieval tools)")
 
         # Create Strands agent
         self.agent = Agent(
