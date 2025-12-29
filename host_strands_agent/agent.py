@@ -24,12 +24,7 @@ logger = logging.getLogger(__name__)
 # AWS and agent configuration
 account_id, region = get_aws_info()
 
-MONITOR_AGENT_ID = get_ssm_parameter("/monitoragent/agentcore/runtime-id")
-MONITOR_PROVIDER_NAME = get_ssm_parameter("/monitoragent/agentcore/provider-name")
-MONITOR_AGENT_ARN = (
-    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{MONITOR_AGENT_ID}"
-)
-
+# Only load agents that are deployed
 ECHOINK_AGENT_ID = get_ssm_parameter("/echoinkagent/agentcore/runtime-id")
 ECHOINK_PROVIDER_NAME = get_ssm_parameter("/echoinkagent/agentcore/provider-name")
 ECHOINK_AGENT_ARN = (
@@ -152,12 +147,7 @@ class HostAgent:
         self.session_id = session_id
         self.actor_id = actor_id
         
-        # Create A2A agent tools
-        monitor_agent_url = (
-            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-            f"{quote(MONITOR_AGENT_ARN, safe='')}/invocations"
-        )
-
+        # Create A2A agent tools for available agents only
         echoink_agent_url = (
             f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
             f"{quote(ECHOINK_AGENT_ARN, safe='')}/invocations"
@@ -166,14 +156,6 @@ class HostAgent:
         echoprepare_agent_url = (
             f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
             f"{quote(ECHOPREPARE_AGENT_ARN, safe='')}/invocations"
-        )
-
-        self.monitor_tool = A2AAgentTool(
-            agent_url=monitor_agent_url,
-            agent_name="monitor_agent",
-            provider_name=MONITOR_PROVIDER_NAME,
-            session_id=session_id,
-            actor_id=actor_id
         )
 
         self.echoink_tool = A2AAgentTool(
@@ -195,38 +177,19 @@ class HostAgent:
         # Create Bedrock model
         bedrock_model = BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=region)
         
-        # Create Strands agent with A2A tools
+        # Create Strands agent with available A2A tools only
         self.agent = Agent(
             name="Host Agent",
-            description="Intelligent orchestrator that delegates tasks to specialized agents",
+            description="Intelligent orchestrator that delegates tasks to specialized educational agents",
             system_prompt=SYSTEM_PROMPT,
             model=bedrock_model,
             tools=[
-                self._create_monitor_tool(),
                 self._create_echoink_tool(),
                 self._create_echoprepare_tool()
             ]
         )
         
-        logger.info("Host Agent initialized with Strands framework and A2A tools")
-
-    def _create_monitor_tool(self):
-        """Create the monitor agent tool"""
-        @tool
-        async def monitor_agent(message: str) -> str:
-            """
-            Delegate monitoring tasks to the monitoring agent.
-            Use for CloudWatch metrics, logs, alarms, and AWS service monitoring.
-            
-            Args:
-                message: The monitoring query or task to delegate
-                
-            Returns:
-                Response from the monitoring agent
-            """
-            return await self.monitor_tool.call_agent(message)
-        
-        return monitor_agent
+        logger.info("Host Agent initialized with Strands framework and A2A tools (EchoInk and EchoPrepare)")
 
     def _create_echoink_tool(self):
         """Create the echo ink agent tool"""
@@ -310,11 +273,8 @@ async def get_agent_and_card(session_id: str, actor_id: str):
     """
     host_agent = get_host_agent(session_id=session_id, actor_id=actor_id)
     
-    # Return agent cards info for compatibility
+    # Return agent cards info for compatibility (only available agents)
     agents_cards = {
-        "monitor_agent": {
-            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(MONITOR_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
-        },
         "echoink_agent": {
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOINK_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         },
