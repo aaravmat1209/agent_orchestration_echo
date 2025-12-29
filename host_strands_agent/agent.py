@@ -276,9 +276,19 @@ async def get_agent_and_card(session_id: str, actor_id: str):
     # Return agent cards info for compatibility (only available agents)
     agents_cards = {
         "echoink_agent": {
+            "agent_card": {
+                "name": "Echo Ink Agent",
+                "description": "Creates educational documents, lesson plans, and course materials",
+                "version": "1.0"
+            },
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOINK_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         },
         "echoprepare_agent": {
+            "agent_card": {
+                "name": "Echo Prepare Agent",
+                "description": "Helps students study and prepare for exams with practice questions and study materials",
+                "version": "1.0"
+            },
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOPREPARE_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
         }
     }

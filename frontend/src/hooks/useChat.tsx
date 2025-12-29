@@ -126,7 +126,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
             const hasAgentData = eventKeys.some(key => {
               const hasCard = typeof event[key] === 'object' &&
                 event[key] !== null &&
-                'agent_card' in event[key] &&
                 'agent_card_url' in event[key];
               console.log(`[DEBUG] Checking key "${key}":`, hasCard);
               return hasCard;
