@@ -258,6 +258,20 @@ export function ChatProvider({ children }: ChatProviderProps) {
             }
             currentTextBlock.content += event.data;
           }
+          // Handle simple string content format: {content: "text", is_task_complete: false}
+          else if ('content' in event && typeof event.content === 'string') {
+            const textContent = event.content;
+            if (textContent) {
+              accumulatedResponse += textContent;
+
+              // Accumulate in current text block
+              if (!currentTextBlock) {
+                currentTextBlock = { type: 'text', content: '' };
+              }
+              currentTextBlock.content += textContent;
+            }
+          }
+
           // Handle host agent format: {content: {parts: [{text: "..."}]}}
           // Mimics test/connect_agent.py lines 230-243
           else if ('content' in event && typeof event.content === 'object' && event.content !== null) {

@@ -33,16 +33,16 @@ DEFAULT_TIMEOUT = 300  # set request timeout to 5 minutes
 # Get AWS region and account ID dynamically
 account_id, region = get_aws_info()
 
-moniter_agent_id = get_ssm_parameter("/monitoragent/agentcore/runtime-id")
-websearch_agent_id = get_ssm_parameter("/websearchagent/agentcore/runtime-id")
+echoink_agent_id = get_ssm_parameter("/echoinkagent/agentcore/runtime-id")
+echoprepare_agent_id = get_ssm_parameter("/echoprepareagent/agentcore/runtime-id")
 hostagent_agent_id = get_ssm_parameter("/hostagent/agentcore/runtime-id")
 
-moniter_agent_arn = (
-    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{moniter_agent_id}"
+echoink_agent_arn = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{echoink_agent_id}"
 )
 
-websearch_agent_arn = (
-    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{websearch_agent_id}"
+echoprepare_agent_arn = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{echoprepare_agent_id}"
 )
 
 hostagent_agent_arn = (
@@ -229,20 +229,27 @@ def invoke_endpoint(
                                     flush=True,
                                 )
 
-                        # Check for the response format with content.parts[].text
+                        # Check for simple string content format: {content: "text", is_task_complete: false}
                         if isinstance(parsed, dict) and "content" in parsed:
-                            content = parsed.get("content", {})
-                            parts = content.get("parts", [])
-                            for part in parts:
-                                if (
-                                    isinstance(part, dict)
-                                    and "text" in part
-                                    and part["text"] is not None
-                                ):
-                                    text = part["text"]
-                                    # Handle escaped newlines
-                                    text = text.replace("\\n", "\n")
-                                    print(text, end="", flush=True)
+                            content = parsed.get("content")
+
+                            # Handle simple string content
+                            if isinstance(content, str):
+                                text = content.replace("\\n", "\n")
+                                print(text, end="", flush=True)
+                            # Handle content.parts[].text format
+                            elif isinstance(content, dict):
+                                parts = content.get("parts", [])
+                                for part in parts:
+                                    if (
+                                        isinstance(part, dict)
+                                        and "text" in part
+                                        and part["text"] is not None
+                                    ):
+                                        text = part["text"]
+                                        # Handle escaped newlines
+                                        text = text.replace("\\n", "\n")
+                                        print(text, end="", flush=True)
                         # Check for complex event structure with contentBlockDelta
                         elif isinstance(parsed, dict) and "event" in parsed:
                             event = parsed["event"]
@@ -293,21 +300,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Connect to a Bedrock agent")
     parser.add_argument(
         "--agent",
-        choices=["monitor", "websearch", "host"],
+        choices=["echoink", "echoprepare", "host"],
         required=True,
-        help="Agent to connect to: 'monitor', 'websearch', or 'host'",
+        help="Agent to connect to: 'echoink', 'echoprepare', or 'host'",
     )
     args = parser.parse_args()
 
     # Set variables based on agent choice
-    if args.agent == "monitor":
-        selected_ssm_prefix = "/monitoragent"
-        selected_agent_arn = moniter_agent_arn
-        print(f"\n🔍 Using Monitor Agent (ID: {moniter_agent_id})")
-    elif args.agent == "websearch":
-        selected_ssm_prefix = "/websearchagent"
-        selected_agent_arn = websearch_agent_arn
-        print(f"\n🔍 Using WebSearch Agent (ID: {websearch_agent_id})")
+    if args.agent == "echoink":
+        selected_ssm_prefix = "/echoinkagent"
+        selected_agent_arn = echoink_agent_arn
+        print(f"\n🔍 Using Echo Ink Agent (ID: {echoink_agent_id})")
+    elif args.agent == "echoprepare":
+        selected_ssm_prefix = "/echoprepareagent"
+        selected_agent_arn = echoprepare_agent_arn
+        print(f"\n🔍 Using Echo Prepare Agent (ID: {echoprepare_agent_id})")
     else:  # host
         selected_ssm_prefix = "/hostagent"
         selected_agent_arn = hostagent_agent_arn

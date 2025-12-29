@@ -85,6 +85,7 @@ class A2AAgentTool:
             Response from the A2A agent
         """
         try:
+            print(f"[A2A_CALL] Calling {self.agent_name} with message: {message[:100]}...", flush=True)
             logger.info(f"Calling {self.agent_name} with message: {message[:100]}...")
             
             # Create authenticated client
@@ -138,7 +139,9 @@ class A2AAgentTool:
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            logger.error(f"Error contacting {self.agent_name}: {str(e)}\n{error_details}")
+            error_msg = f"[A2A_ERROR] Error contacting {self.agent_name}: {type(e).__name__}: {str(e)}\n{error_details}"
+            print(error_msg, flush=True)  # Print to stdout for CloudWatch
+            logger.error(error_msg)
             return f"Error contacting {self.agent_name}: {type(e).__name__}: {str(e)}"
 
 
