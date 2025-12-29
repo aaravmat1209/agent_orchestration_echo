@@ -136,8 +136,10 @@ class A2AAgentTool:
             return response_text
 
         except Exception as e:
-            logger.error(f"Error contacting {self.agent_name}: {str(e)}", exc_info=True)
-            return f"Error contacting {self.agent_name}: {str(e)}"
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Error contacting {self.agent_name}: {str(e)}\n{error_details}")
+            return f"Error contacting {self.agent_name}: {type(e).__name__}: {str(e)}"
 
 
 class HostAgent:
