@@ -395,6 +395,7 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
     print_header("AWS Configuration")
     config["aws"] = {
         "region": "us-west-2",  # Fixed to us-west-2 as verified in pre-checks
+        "account_id": account_id,
         "bedrock_model_id": get_input(
             "Bedrock Model ID",
             default=(
@@ -599,6 +600,7 @@ def display_configuration(config: Dict[str, Any]):
 
     print(f"{Colors.BOLD}AWS Configuration:{Colors.END}")
     print(f"  Region: {config['aws']['region']}")
+    print(f"  Account ID: {config['aws']['account_id']}")
     print(f"  Bedrock Model ID: {config['aws']['bedrock_model_id']}")
 
     print(f"\n{Colors.BOLD}CloudFormation Stacks:{Colors.END}")
@@ -737,6 +739,13 @@ def create_echo_docs_bucket(config: Dict[str, Any]) -> bool:
 
     account_id = config["aws"]["account_id"]
     region = config["aws"]["region"]
+    
+    # Validate account_id
+    if not account_id or account_id == "unknown":
+        print_error("Account ID is not available. Cannot create echo-docs bucket.")
+        print_info("This usually means AWS credentials check failed during pre-deployment checks.")
+        return False
+    
     bucket_name = f"echo-docs-{account_id}"
 
     # Check if bucket already exists
