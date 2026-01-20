@@ -1,29 +1,50 @@
-# Agent-to-Agent (A2A) Multi-Agent System on Amazon Bedrock AgentCore for Incident Response Logging
+# Echo — A2A Multi-Agent Educational Platform on Amazon Bedrock AgentCore
 
-A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protocol.org/latest/) protocol using specialized agents running on [Amazon Bedrock `AgentCore` runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html), demonstrating intelligent coordination for AWS infrastructure monitoring and operations management. This repository walks you through setting up three core agents to answer questions about incidents and metrics in your AWS accounts and search for best remediation strategies. A monitoring agent (built using the [`Strands` Agents SDK](https://strandsagents.com/latest/)) is responsible for handling all questions related to metrics and logs within AWS and cross AWS accounts. A remediation agent (built using [`OpenAI`'s Agents SDK](https://openai.github.io/openai-agents-python/)) is responsible to doing efficient web searches for best remediation strategies and optimization techniques that the user can ask for. Both agents run on separate runtimes as `A2A` servers and utilize all `AgentCore` primitives - memory for context management, observability for deep level analysis about both agents, gateway for access to tools (`Cloudwatch`, `JIRA` and `TAVILY` APIs) and `AgentCore` identity for enabling inbound and outbound access into the agent and then into the resources that the agent can access using OAuth 2.0 and APIs. These two agents are then managed by a host [`Strands` agent](https://strandsagents.com/latest/) that acts as a client and delegates tasks to each of these agents using A2A on Runtime. The Strands host agent runs on a separate `AgentCore` runtime of its own.
+A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protocol.org/latest/) protocol using specialized agents running on [Amazon Bedrock AgentCore runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html), powering an intelligent educational platform for course material creation, student preparation, video analytics, and document management.
 
-## Demo
+This repository walks you through setting up a multi-agent orchestration system where specialized agents collaborate via A2A to handle distinct educational workflows — **Video Flow** and **Documents Flow** — all coordinated by a central orchestrator and backed by AgentCore primitives (memory, observability, identity, and gateway).
 
-![demo](./images/demo.gif)
+## Architecture
 
-## Architecture Overview
+![Architecture Design](./Design.drawio.png)
 
-![arch](./images/architecture.png)
+The system is composed of two primary flows:
+
+### Video Flow
+- A **Video Agent** (Strands SDK on AgentCore) exposes tools like `fetch_metadata`, `fetch_transcript`, `fetch_engagement`, `fetch_polls`, and `compute_video_insights`
+- Requests route through an AgentCore **Gateway** to a **Fetch Video Data** Lambda that calls the Company Video API
+- Results are stored in a **Bedrock Knowledge Base** backed by an S3 bucket (`video-metadata`) and a **Video Metadata** DynamoDB table
+- The agent has its own **Memory** and **Observability** via AgentCore
+
+### Documents Flow
+- A **Documents Agent** (Strands SDK on AgentCore) delegates to sub-agents:
+  - **Document Context Agent** — retrieves and manages educational documents via a Bedrock Knowledge Base with S3 Vector / Nova Multi-Modal Embeddings, reading from `e-ink-documents` S3 and the Company Documents API
+  - **Analytics Agent** — tracks usage analytics, writing to Analytics Data (DynamoDB), with an analytics ingest Lambda pushing to the Company Analytics Data API and `ink-analytics-raw` S3
+  - **Session Manager** — manages user sessions across interactions
+- Each sub-component has its own **Memory** and **Observability**
+
+### Orchestration & Auth
+- Users authenticate via **Cognito** and interact through an **Amplify Frontend**
+- Requests hit **API Gateway** → **Orchestrator Lambda** → **A2A Client** which routes to the appropriate agent runtime
+- An **Admin Dashboard** (also behind Cognito) provides proxy Lambdas for video/document analytics data and agent management
+
 
 > [!NOTE]
 > **Default Models**
 >
 > This solution uses the following AI models by default:
 > - **Host Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
-> - **Monitoring Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
-> - **Web Search Agent (OpenAI)**: `gpt-4o-2024-08-06`
+> - **Echo Ink Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
+> - **Echo Prepare Agent (Strands)**: `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (Amazon Bedrock)
+> - **Monitoring Agent (Strands)**: `global.anthropic.claude-haiku-4-5-20251001-v1:0` (Amazon Bedrock)
 >
-> These models can be customized during deployment. The deployment script will prompt you to specify different model IDs if needed.
+> These models can be customized during deployment.
 
 ## What is A2A?
 
 <details>
   <summary>Agent-to-Agent (A2A)</summary>
+
    **Agent-to-Agent (A2A)** is an open standard protocol that enables seamless communication and collaboration between AI agents across different platforms and implementations. The A2A protocol defines:
 
    - **Agent Discovery**: Standardized agent cards that describe capabilities, skills, and communication endpoints
@@ -33,7 +54,7 @@ A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protoco
 
    Learn more about the A2A protocol: [A2A Specification](https://a2a-protocol.org/)
 
-   ## A2A Support on Amazon Bedrock AgentCore
+   ### A2A Support on Amazon Bedrock AgentCore
 
    Amazon Bedrock AgentCore provides native support for the A2A protocol, enabling you to:
 
@@ -43,174 +64,90 @@ A comprehensive implementation of the [Agent-to-Agent (A2A)](https://a2a-protoco
    - **Scalable deployment** leveraging AWS infrastructure for production workloads
    - **Built-in observability** with CloudWatch integration and OpenTelemetry support
 
-   AgentCore simplifies A2A agent deployment by handling infrastructure, authentication, scaling, and monitoring automatically.
 </details>
+
+## Agents
+
+| Agent | Role | SDK | Runtime |
+|-------|------|-----|---------|
+| **Host / Orchestrator** | Routes user requests to the correct downstream agent via A2A | Strands | AgentCore |
+| **Echo Ink** | Creates educational documents (syllabi, exams, lesson plans) with sub-agent orchestration | Strands | AgentCore |
+| **Echo Prepare** | Helps students study — web research, practice questions, confidence tracking | Strands | AgentCore |
+| **Monitoring** | CloudWatch log/metric queries via MCP Gateway | Strands | AgentCore |
+| **Video Agent** | Video metadata, transcripts, engagement analytics | Strands | AgentCore |
+| **Documents Agent** | Document context retrieval, analytics, session management | Strands | AgentCore |
 
 ## Prerequisites
 
-1. **AWS Account**: You need an active AWS account with appropriate permissions
-   - [Create AWS Account](https://aws.amazon.com/account/)
-   - [AWS Console Access](https://aws.amazon.com/console/)
-
-2. **AWS CLI**: Install and configure AWS CLI with your credentials
-   - [Install AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-   - [Configure AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html)
-   - **Important**: Set your region to `us-west-2`
-
+1. **AWS Account** with appropriate permissions — [Create AWS Account](https://aws.amazon.com/account/)
+2. **AWS CLI** installed and configured — [Install](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
    ```bash
    aws configure set region us-west-2
    ```
+3. **Python 3.8+**
+4. **uv** package manager — [Install guide](https://docs.astral.sh/uv/getting-started/installation/)
+5. **API Keys**:
+   - **Tavily API Key**: [tavily.com](https://tavily.com/) (for Echo Prepare web search)
 
-3. **Python 3.8+**: Required to run the deployment scripts
+6. **Supported Regions**:
 
-4. **uv**: Install uv package manager using [guide](https://docs.astral.sh/uv/getting-started/installation/)
+   | Region Code | Region Name | Status |
+   |-------------|-------------|--------|
+   | `us-west-2` | US West (Oregon) | ✅ Supported |
 
-5. **API Keys**: You'll need the following API keys (the deployment script will prompt for these):
-   - **OpenAI API Key**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
-   - **Tavily API Key**: Get from [Tavily](https://tavily.com/)
-
-   > **Note**: Make sure your OpenAI account has credits if you are using paid models. The host agent now uses Amazon Bedrock models instead of Google AI.
-
-6. **Supported Regions**: This solution is currently tested and supported in the following AWS regions:
-
-   | Region Code   | Region Name          | Status      |
-   |---------------|----------------------|-------------|
-   | `us-west-2`   | US West (Oregon)     | ✅ Supported |
-
-## Quick Start Deployment
-
-The easiest way to deploy this solution is using our automated deployment script:
+## Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/awslabs/amazon-bedrock-agentcore-samples.git
-cd 02-use-cases/A2A-multi-agent-incident-response
+git clone https://github.com/aaravmat1209/agent_orchestration_echo.git
+cd agent_orchestration_echo
 
 # Run the interactive deployment script
 uv run deploy.py
 ```
 
-The deployment script will:
+The deployment script handles: AWS CLI verification, credential checks, parameter collection, S3 bucket creation, and sequential CloudFormation stack deployment (~10-15 min).
 
-1. ✅ Verify AWS CLI is installed and configured
-2. ✅ Check AWS credentials are valid
-3. ✅ Confirm region is set to `us-west-2`
-4. ✅ Interactively collect all required parameters
-5. ✅ Generate unique S3 bucket names
-6. ✅ Save configuration to `.a2a.config`
-7. ✅ Automatically deploy all stacks in the correct order
-8. ✅ Wait for each stack to complete before proceeding
-
-**Total deployment time**: Approximately 10-15 minutes
-
-## React Frontend
-
-Run the frontend using following commands.
+## Frontend
 
 ```bash
 cd frontend
 npm install
-
 chmod +x ./setup-env.sh
 ./setup-env.sh
-
 npm run dev
 ```
 
-## Strands Agent Development
-
-The host agent now uses the [Strands Agents SDK](https://strandsagents.com/latest/) for multi-agent orchestration. Strands provides a model-driven approach to building AI agents with built-in A2A protocol support.
-
-Key benefits of the Strands implementation:
-- **Native A2A Support**: Built-in Agent-to-Agent protocol integration
-- **Bedrock Integration**: Direct support for Amazon Bedrock models
-- **Tool Integration**: Easy integration with A2A agents as tools
-- **Streaming Support**: Real-time streaming responses
-- **Production Ready**: Designed for production deployments
-
-For development and debugging, you can use the Strands documentation and examples at [strandsagents.com](https://strandsagents.com/latest/).
-
-## A2A Protocol Inspector
-
-The [A2A Inspector](https://github.com/a2aproject/a2a-inspector) is a web-based tool designed to help developers inspect, debug, and validate servers that implement the A2A (Agent2Agent) protocol. It provides a user-friendly interface to interact with an A2A agent, view communication, and ensure specification compliance.
-
-![inspector](./images/inspector.gif)
-
-1. Follow Setup and Running the Application [instructions](https://github.com/a2aproject/a2a-inspector?tab=readme-ov-file#setup-and-running-the-application).
-2. Get URL and bearer token from:
-
-   ```bash
-
-   uv run monitoring_strands_agent/scripts/get_m2m_token.py   
-   # OR
-   uv run web_search_openai_agents/scripts/get_m2m_token.py   
-   ```
-
-3. Paste the URL & bearer token (`Bearer <Add Here>`) on A2A Inspector and add three headers `Authorization`, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, and `X-Amzn-Bedrock-AgentCore-Runtime-Custom-Actorid`. The value of `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` should be atleast 32 characters (`550e8400-e29b-41d4-a716-446655440000
-`).
-
-### Bearer tokens
-
-You can obtain bearer tokens for each agent to use with tools like the A2A Inspector or for direct API testing.
-Get M2M token for the monitoring agent:
+## Testing
 
 ```bash
-uv run monitoring_strands_agent/scripts/get_m2m_token.py
-
-uv run web_search_openai_agents/scripts/get_m2m_token.py
-
-uv run host_strands_agent/scripts/get_m2m_token.py
-```
-
-## Test Scripts
-
-Test individual agents using the interactive script:
-
-```bash
-# Test monitoring agent
+# Test individual agents
 uv run test/connect_agent.py --agent monitor
-
-# Test web search agent
-uv run test/connect_agent.py --agent websearch
-
-# Test host agent
 uv run test/connect_agent.py --agent host
 ```
 
-## Cleanup
-
-### Automated Cleanup (Recommended)
-
-The easiest way to clean up all resources is using our automated cleanup script:
+### Bearer Tokens
 
 ```bash
-# Run the cleanup script
+uv run monitoring_strands_agent/scripts/get_m2m_token.py
+uv run echo_ink_agent/scripts/get_m2m_token.py
+uv run echo_prepare_agent/scripts/get_m2m_token.py
+uv run video_strands_agent/scripts/get_m2m_token.py
+uv run documents_strands_agent/scripts/get_m2m_token.py
+uv run host_strands_agent/scripts/get_m2m_token.py
+```
+
+## A2A Protocol Inspector
+
+Use the [A2A Inspector](https://github.com/a2aproject/a2a-inspector) to debug and validate A2A communication. Paste the agent URL and bearer token (`Bearer <token>`) along with headers `Authorization`, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` (≥32 chars), and `X-Amzn-Bedrock-AgentCore-Runtime-Custom-Actorid`.
+
+## Cleanup
+
+```bash
 uv run cleanup.py
 ```
 
-The cleanup script will:
-
-1. 🔍 Load your deployment configuration from `.a2a.config`
-2. 📋 Show all resources that will be deleted
-3. 🔒 Require double confirmation (including typing 'DELETE')
-4. 🗑️ Delete all resources in the correct reverse order:
-   - Host Agent Stack
-   - Web Search Agent Stack
-   - Monitoring Agent Stack
-   - Cognito Stack
-   - S3 Bucket and contents
-5. ⏱️ Wait for each deletion to complete before proceeding
-
-**Total cleanup time**: Approximately 10-15 minutes
+Deletes all stacks in reverse order, empties S3 buckets, and removes AgentCore resources (~10-15 min).
 
 > [!WARNING]
-> This will permanently delete all deployed resources. This action cannot be undone!
-
-### Troubleshooting Cleanup
-
-If cleanup fails or you encounter errors:
-
-1. **Check stack status** in the AWS CloudFormation console
-2. **Manual resource deletion**: Some resources may need to be deleted manually if they have dependencies
-3. **S3 bucket not empty**: Ensure the bucket is completely empty before deletion
-4. **Review CloudWatch Logs**: Check for any errors in stack deletion events
+> This permanently deletes all deployed resources. Cannot be undone.
