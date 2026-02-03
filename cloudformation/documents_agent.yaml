@@ -1,0 +1,613 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Documents Agent Runtime - Strands-based document management agent with Knowledge Base, Analytics, and Session Management for the Documents Flow"
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Description: Amazon Bedrock model id
+    Default: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0'
+
+  GitHubURL:
+    Type: String
+    Description: Github URL of the project
+    Default: https://github.com/aaravmat1209/agent_orchestration_echo.git
+
+  AgentDirectory:
+    Type: String
+    Description: Agent directory with Dockerfile of agent
+    Default: documents_strands_agent
+
+  CognitoStackName:
+    Type: String
+    Description: Name of the Cognito CloudFormation stack to import values from
+
+Resources:
+  # ============================================================================
+  # IAM — Runtime Execution Role
+  # ============================================================================
+  AgentCoreRuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AssumeRolePolicy
+            Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref AWS::AccountId
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: AgentCoreRuntimeExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRImageAccess
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*'
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+              - Sid: ECRTokenAccess
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              - Effect: Allow
+                Resource: '*'
+                Action: cloudwatch:PutMetricData
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': 'bedrock-agentcore'
+              - Sid: BedrockModelAccess
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+              - Sid: SSMParameterAccess
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
+              - Sid: Oauth2Token
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetResourceOauth2Token
+                Resource: '*'
+              - Sid: SecretsManager
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: '*'
+              - Sid: MemoryAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:ListMemories
+                  - bedrock-agentcore:ListMemoryRecords
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                  - bedrock-agentcore:GetMemory
+                  - bedrock-agentcore:GetMemoryRecord
+                  - bedrock-agentcore:BatchCreateMemoryRecords
+                  - bedrock-agentcore:BatchDeleteMemoryRecords
+                  - bedrock-agentcore:BatchUpdateMemoryRecords
+                  - bedrock-agentcore:ListActors
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:GetEvent
+                Resource:
+                  - !GetAtt AgentMemory.MemoryArn
+                  - !Sub '${AgentMemory.MemoryArn}/*'
+              - Sid: DocumentStorageAccess
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::e-ink-documents-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::e-ink-documents-${AWS::AccountId}/*'
+                  - !Sub 'arn:aws:s3:::ink-analytics-raw-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3:::ink-analytics-raw-${AWS::AccountId}/*'
+              - Sid: DynamoDBAnalyticsAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt AnalyticsDataTable.Arn
+                  - !Sub '${AnalyticsDataTable.Arn}/index/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Runtime-Role'
+
+  # ============================================================================
+  # Storage — S3 buckets and DynamoDB for the Documents Flow
+  # ============================================================================
+  EInkDocumentsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub 'e-ink-documents-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-EInkDocuments-Bucket'
+
+  InkAnalyticsRawBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub 'ink-analytics-raw-${AWS::AccountId}'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-InkAnalyticsRaw-Bucket'
+
+  AnalyticsDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-analytics-data'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: course_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: course-index
+          KeySchema:
+            - AttributeName: course_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-AnalyticsData-Table'
+
+  # ============================================================================
+  # ECR Repository
+  # ============================================================================
+  AgentECRRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    Properties:
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Agent-ECR-Repository'
+
+  # ============================================================================
+  # CodeBuild
+  # ============================================================================
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !GetAtt AgentECRRepository.Arn
+
+  AgentDockerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: 'Build and push Documents Agent Docker image to ECR'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ECR_REPOSITORY_URI
+            Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AgentECRRepository}'
+          - Name: ECR_REPOSITORY_NAME
+            Value: !Ref AgentECRRepository
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AGENT_DIRECTORY
+            Value: !Ref AgentDirectory
+      Source:
+        Type: GITHUB
+        Location: !Ref GitHubURL
+        GitCloneDepth: 1
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - cd ${AGENT_DIRECTORY}
+                - export IMAGE_TAG="build-${CODEBUILD_BUILD_NUMBER}"
+            build:
+              commands:
+                - |
+                  docker build -t bedrock-agentcore-arm64 . &
+                  BUILD_PID=$!
+                  aws ecr get-login-password --region $AWS_DEFAULT_REGION | \
+                  docker login --username AWS --password-stdin $ECR_REPOSITORY_URI &
+                  AUTH_PID=$!
+                  wait $BUILD_PID || exit 1
+                  wait $AUTH_PID || exit 1
+                - docker tag bedrock-agentcore-arm64:latest $ECR_REPOSITORY_URI:${IMAGE_TAG}
+            post_build:
+              commands:
+                - docker push $ECR_REPOSITORY_URI:${IMAGE_TAG}
+      TimeoutInMinutes: 30
+
+  # ============================================================================
+  # CodeBuild Trigger Lambda
+  # ============================================================================
+  CodeBuildTriggerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CodeBuildTriggerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt AgentDockerBuildProject.Arn
+        - PolicyName: ECRCleanupPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:ListImages
+                  - ecr:BatchDeleteImage
+                Resource: !GetAtt AgentECRRepository.Arn
+        - PolicyName: BedrockIdentityAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateOauth2CredentialProvider
+                  - bedrock-agentcore:DeleteOauth2CredentialProvider
+                  - bedrock-agentcore:GetOauth2CredentialProvider
+                  - bedrock-agentcore:ListOauth2CredentialProviders
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                Resource: '*'
+
+  CodeBuildTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.13
+      Handler: index.lambda_handler
+      Role: !GetAtt CodeBuildTriggerLambdaRole.Arn
+      Timeout: 900
+      Environment:
+        Variables:
+          CODEBUILD_PROJECT_NAME: !Ref AgentDockerBuildProject
+          ECR_REPOSITORY_NAME: !Ref AgentECRRepository
+      Code:
+        ZipFile: |
+          import json, boto3, urllib3, logging, os, time
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def empty_ecr_repository(repo):
+              ecr = boto3.client('ecr')
+              imgs = ecr.list_images(repositoryName=repo).get('imageIds', [])
+              if imgs:
+                  ecr.batch_delete_image(repositoryName=repo, imageIds=imgs)
+
+          def lambda_handler(event, context):
+              try:
+                  rt = event['RequestType']
+                  project = os.environ['CODEBUILD_PROJECT_NAME']
+                  ecr_repo = os.environ['ECR_REPOSITORY_NAME']
+                  if rt == 'Create':
+                      cb = boto3.client('codebuild')
+                      bid = cb.start_build(projectName=project)['build']['id']
+                      while True:
+                          if context.get_remaining_time_in_millis() < 60000:
+                              return send(event, context, 'FAILED', {})
+                          s = cb.batch_get_builds(ids=[bid])['builds'][0]
+                          if s['buildComplete']:
+                              return send(event, context, 'SUCCESS' if s['buildStatus'] == 'SUCCEEDED' else 'FAILED', {})
+                          time.sleep(30)
+                  elif rt == 'Delete':
+                      empty_ecr_repository(ecr_repo)
+                      send(event, context, 'SUCCESS', {})
+                  else:
+                      send(event, context, 'SUCCESS', {})
+              except Exception as e:
+                  logger.error(str(e))
+                  send(event, context, 'FAILED', {})
+
+          def send(event, context, status, data):
+              body = json.dumps({'Status': status, 'Reason': 'See logs', 'PhysicalResourceId': 'CodeBuildTrigger', 'StackId': event['StackId'], 'RequestId': event['RequestId'], 'LogicalResourceId': event['LogicalResourceId']})
+              urllib3.PoolManager().request('PUT', event['ResponseURL'], body=body, headers={'content-type': '', 'content-length': str(len(body))})
+
+  CodeBuildTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: AgentDockerBuildProject
+    Properties:
+      ServiceToken: !GetAtt CodeBuildTriggerFunction.Arn
+
+  # ============================================================================
+  # AgentCore Memory
+  # ============================================================================
+  MemoryExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref AWS::AccountId
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: MemoryBedrockModelAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+
+  AgentMemory:
+    Type: AWS::BedrockAgentCore::Memory
+    Properties:
+      EventExpiryDuration: 60
+      Name: !Join ['', !Split ['-', !Sub '${AWS::StackName}Memory']]
+      MemoryExecutionRoleArn: !GetAtt MemoryExecutionRole.Arn
+      MemoryStrategies:
+        - SemanticMemoryStrategy:
+            Name: DocumentContextMemory
+            Namespaces:
+              - "/document-context/{actorId}"
+        - SemanticMemoryStrategy:
+            Name: AnalyticsMemory
+            Namespaces:
+              - "/analytics/{actorId}"
+        - UserPreferenceMemoryStrategy:
+            Name: UserPreference
+            Namespaces:
+              - "/users/{actorId}"
+      Tags:
+        Name: !Sub '${AWS::StackName}-Agent-Memory'
+
+  # ============================================================================
+  # AgentCore Runtime
+  # ============================================================================
+  AgentRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    DependsOn: CodeBuildTrigger
+    Properties:
+      AgentRuntimeName: !Join ['', !Split ['-', !Sub '${AWS::StackName}']]
+      RoleArn: !GetAtt AgentCoreRuntimeExecutionRole.Arn
+      NetworkConfiguration:
+        NetworkMode: "PUBLIC"
+      AgentRuntimeArtifact:
+        ContainerConfiguration:
+          ContainerUri: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AgentECRRepository}:build-1'
+      ProtocolConfiguration: A2A
+      RequestHeaderConfiguration:
+        RequestHeaderAllowlist:
+          - X-Amzn-Bedrock-AgentCore-Runtime-Custom-Actorid
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl:
+            Fn::ImportValue: !Sub '${CognitoStackName}-DiscoveryUrl'
+          AllowedClients:
+            - Fn::ImportValue: !Sub '${CognitoStackName}-MonitoringClientId'
+      EnvironmentVariables:
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        MCP_REGION: !Sub '${AWS::Region}'
+        MEMORY_ID: !GetAtt AgentMemory.MemoryId
+        ANALYTICS_TABLE: !Ref AnalyticsDataTable
+        DOCUMENTS_BUCKET: !Sub 'e-ink-documents-${AWS::AccountId}'
+        ANALYTICS_BUCKET: !Sub 'ink-analytics-raw-${AWS::AccountId}'
+      Tags:
+        Name: !Sub '${AWS::StackName}-Agent-Runtime'
+
+  # ============================================================================
+  # Observability
+  # ============================================================================
+  AgentRuntimeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupClass: STANDARD
+      LogGroupName: !Sub "/aws/vendedlogs/bedrock-agentcore/${AgentRuntime.AgentRuntimeId}"
+
+  AgentRuntimeDeliverSourceApplicationLogs:
+    Type: AWS::Logs::DeliverySource
+    Properties:
+      LogType: APPLICATION_LOGS
+      Name: !Sub "${AgentRuntime.AgentRuntimeId}-logs-source"
+      ResourceArn: !GetAtt AgentRuntime.AgentRuntimeArn
+
+  AgentRuntimeDeliveryDestination:
+    Type: AWS::Logs::DeliveryDestination
+    Properties:
+      DeliveryDestinationType: "CWL"
+      DestinationResourceArn: !GetAtt AgentRuntimeLogGroup.Arn
+      Name: !Sub "${AgentRuntime.AgentRuntimeId}-logs-destination"
+
+  AgentRuntimeDeliveryApplicationLogs:
+    Type: AWS::Logs::Delivery
+    DependsOn:
+      - AgentRuntimeDeliverSourceApplicationLogs
+      - AgentRuntimeDeliveryDestination
+    Properties:
+      DeliveryDestinationArn: !GetAtt AgentRuntimeDeliveryDestination.Arn
+      DeliverySourceName: !Sub "${AgentRuntime.AgentRuntimeId}-logs-source"
+
+  # ============================================================================
+  # SSM Parameters
+  # ============================================================================
+  AgentRuntimeIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/documentsagent/agentcore/runtime-id'
+      Description: 'Documents Agent BedrockAgentCore Runtime ID'
+      Type: String
+      Value: !GetAtt AgentRuntime.AgentRuntimeId
+
+  AgentProviderNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/documentsagent/agentcore/provider-name'
+      Description: 'Documents Agent OAuth2 Credential Provider Name'
+      Type: String
+      Value: !Sub 'AgentOAuth2Provider-${AWS::StackName}'
+
+Outputs:
+  AgentRuntimeArn:
+    Description: 'ARN of the Documents Agent Runtime'
+    Value: !GetAtt AgentRuntime.AgentRuntimeArn
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentRuntimeArn'
+
+  AgentRuntimeId:
+    Description: 'ID of the Documents Agent Runtime'
+    Value: !GetAtt AgentRuntime.AgentRuntimeId
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentRuntimeId'
+
+  AnalyticsDataTableName:
+    Description: 'DynamoDB table for analytics data'
+    Value: !Ref AnalyticsDataTable
+    Export:
+      Name: !Sub '${AWS::StackName}-AnalyticsDataTable'
+
+  EInkDocumentsBucketName:
+    Description: 'S3 bucket for e-ink documents'
+    Value: !Ref EInkDocumentsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-EInkDocumentsBucket'
+
+  InkAnalyticsRawBucketName:
+    Description: 'S3 bucket for raw analytics data'
+    Value: !Ref InkAnalyticsRawBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-InkAnalyticsRawBucket'
