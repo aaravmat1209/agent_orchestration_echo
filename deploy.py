@@ -419,6 +419,8 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
         "cognito": ("Cognito Stack Name", "cognito-stack-a2a"),
         "echo_ink_agent": ("Echo Ink Agent Stack Name", "echo-ink-agent-a2a"),
         "echo_prepare_agent": ("Echo Prepare Agent Stack Name", "echo-prepare-agent-a2a"),
+        "video_agent": ("Video Agent Stack Name", "video-agent-a2a"),
+        "documents_agent": ("Documents Agent Stack Name", "documents-agent-a2a"),
         "host_agent": ("Host Agent Stack Name", "host-agent-a2a"),
     }
 
@@ -548,10 +550,12 @@ def collect_deployment_parameters(account_id: str = None) -> Dict[str, Any]:
         # Agent directories are taken from CloudFormation defaults - not configurable
         "echo_ink_agent_directory": "echo_ink_agent",
         "echo_prepare_agent_directory": "echo_prepare_agent",
+        "video_agent_directory": "video_strands_agent",
+        "documents_agent_directory": "documents_strands_agent",
         "host_agent_directory": "host_strands_agent",
     }
     print_info(
-        "Agent directories will use CloudFormation defaults (echo_ink_agent, echo_prepare_agent, host_strands_agent)"
+        "Agent directories will use CloudFormation defaults (echo_ink_agent, echo_prepare_agent, video_strands_agent, documents_strands_agent, host_strands_agent)"
     )
 
     # API Keys
@@ -607,6 +611,8 @@ def display_configuration(config: Dict[str, Any]):
     print(f"  Cognito: {config['stacks']['cognito']}")
     print(f"  Echo Ink Agent: {config['stacks']['echo_ink_agent']}")
     print(f"  Echo Prepare Agent: {config['stacks']['echo_prepare_agent']}")
+    print(f"  Video Agent: {config['stacks']['video_agent']}")
+    print(f"  Documents Agent: {config['stacks']['documents_agent']}")
     print(f"  Host Agent: {config['stacks']['host_agent']}")
 
     print(f"\n{Colors.BOLD}Cognito Configuration:{Colors.END}")
@@ -624,6 +630,8 @@ def display_configuration(config: Dict[str, Any]):
     print(f"  Repository URL: {config['github']['url']}")
     print(f"  Echo Ink Agent Dir: {config['github']['echo_ink_agent_directory']}")
     print(f"  Echo Prepare Agent Dir: {config['github']['echo_prepare_agent_directory']}")
+    print(f"  Video Agent Dir: {config['github']['video_agent_directory']}")
+    print(f"  Documents Agent Dir: {config['github']['documents_agent_directory']}")
     print(f"  Host Agent Dir: {config['github']['host_agent_directory']}")
 
     print(f"\n{Colors.BOLD}API Keys:{Colors.END}")

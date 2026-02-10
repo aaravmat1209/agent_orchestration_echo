@@ -37,6 +37,19 @@ ECHOPREPARE_AGENT_ARN = (
     f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{ECHOPREPARE_AGENT_ID}"
 )
 
+# Video and Documents agents (new flows)
+VIDEO_AGENT_ID = get_ssm_parameter("/videoagent/agentcore/runtime-id")
+VIDEO_PROVIDER_NAME = get_ssm_parameter("/videoagent/agentcore/provider-name")
+VIDEO_AGENT_ARN = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{VIDEO_AGENT_ID}"
+)
+
+DOCUMENTS_AGENT_ID = get_ssm_parameter("/documentsagent/agentcore/runtime-id")
+DOCUMENTS_PROVIDER_NAME = get_ssm_parameter("/documentsagent/agentcore/provider-name")
+DOCUMENTS_AGENT_ARN = (
+    f"arn:aws:bedrock-agentcore:{region}:{account_id}:runtime/{DOCUMENTS_AGENT_ID}"
+)
+
 
 class A2AAgentTool:
     """A2A Agent Tool for communicating with remote agents via A2A protocol"""
@@ -179,10 +192,36 @@ class HostAgent:
             actor_id=actor_id
         )
 
+        # Video and Documents agent URLs
+        video_agent_url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{quote(VIDEO_AGENT_ARN, safe='')}/invocations"
+        )
+        documents_agent_url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{quote(DOCUMENTS_AGENT_ARN, safe='')}/invocations"
+        )
+
+        self.video_tool = A2AAgentTool(
+            agent_url=video_agent_url,
+            agent_name="video_agent",
+            provider_name=VIDEO_PROVIDER_NAME,
+            session_id=session_id,
+            actor_id=actor_id
+        )
+
+        self.documents_tool = A2AAgentTool(
+            agent_url=documents_agent_url,
+            agent_name="documents_agent",
+            provider_name=DOCUMENTS_PROVIDER_NAME,
+            session_id=session_id,
+            actor_id=actor_id
+        )
+
         # Create Bedrock model
         bedrock_model = BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=region)
         
-        # Create Strands agent with available A2A tools only
+        # Create Strands agent with all A2A tools
         self.agent = Agent(
             name="Host Agent",
             description="Intelligent orchestrator that delegates tasks to specialized educational agents",
@@ -190,11 +229,13 @@ class HostAgent:
             model=bedrock_model,
             tools=[
                 self._create_echoink_tool(),
-                self._create_echoprepare_tool()
+                self._create_echoprepare_tool(),
+                self._create_video_tool(),
+                self._create_documents_tool(),
             ]
         )
         
-        logger.info("Host Agent initialized with Strands framework and A2A tools (EchoInk and EchoPrepare)")
+        logger.info("Host Agent initialized with Strands framework and A2A tools (EchoInk, EchoPrepare, Video, Documents)")
 
     def _create_echoink_tool(self):
         """Create the echo ink agent tool"""
@@ -232,6 +273,42 @@ class HostAgent:
             return await self.echoprepare_tool.call_agent(message)
 
         return echoprepare_agent
+
+    def _create_video_tool(self):
+        """Create the video agent tool"""
+        @tool
+        async def video_agent(message: str) -> str:
+            """
+            Delegate video analytics tasks to the Video Agent.
+            Use for video metadata, transcripts, engagement metrics, polls, and insights.
+
+            Args:
+                message: The video analytics request to delegate
+
+            Returns:
+                Response from the Video Agent
+            """
+            return await self.video_tool.call_agent(message)
+
+        return video_agent
+
+    def _create_documents_tool(self):
+        """Create the documents agent tool"""
+        @tool
+        async def documents_agent(message: str) -> str:
+            """
+            Delegate document management tasks to the Documents Agent.
+            Use for document search, retrieval, analytics, and session management.
+
+            Args:
+                message: The document management request to delegate
+
+            Returns:
+                Response from the Documents Agent
+            """
+            return await self.documents_tool.call_agent(message)
+
+        return documents_agent
 
     async def stream(self, query: str):
         """Stream response from the agent"""
@@ -278,7 +355,7 @@ async def get_agent_and_card(session_id: str, actor_id: str):
     """
     host_agent = get_host_agent(session_id=session_id, actor_id=actor_id)
     
-    # Return agent cards info for compatibility (only available agents)
+    # Return agent cards info for compatibility (all agents)
     agents_cards = {
         "echoink_agent": {
             "agent_card": {
@@ -295,7 +372,23 @@ async def get_agent_and_card(session_id: str, actor_id: str):
                 "version": "1.0"
             },
             "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(ECHOPREPARE_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
-        }
+        },
+        "video_agent": {
+            "agent_card": {
+                "name": "Video Agent",
+                "description": "Educational video analytics — metadata, transcripts, engagement, polls, and insights",
+                "version": "1.0"
+            },
+            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(VIDEO_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
+        },
+        "documents_agent": {
+            "agent_card": {
+                "name": "Documents Agent",
+                "description": "Document management — context retrieval, analytics, and session management",
+                "version": "1.0"
+            },
+            "agent_card_url": f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(DOCUMENTS_AGENT_ARN, safe='')}/invocations/.well-known/agent-card.json"
+        },
     }
 
     return host_agent, agents_cards

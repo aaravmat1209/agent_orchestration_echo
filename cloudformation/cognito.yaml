@@ -77,6 +77,10 @@ Resources:
           ScopeDescription: 'Echo Prepare agent specific access'
         - ScopeName: 'hostagent'
           ScopeDescription: 'Host Agent specific access'
+        - ScopeName: 'video'
+          ScopeDescription: 'Video agent specific access'
+        - ScopeName: 'documents'
+          ScopeDescription: 'Documents agent specific access'
 
   # Monitoring Client for M2M Authentication
   MonitoringClient:
