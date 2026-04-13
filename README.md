@@ -102,11 +102,11 @@ The system is composed of two primary flows:
 git clone https://github.com/aaravmat1209/agent_orchestration_echo.git
 cd agent_orchestration_echo
 
-# Run the interactive deployment script
-uv run deploy.py
+# Run the interactive deployment script (works on CloudShell)
+bash deploy.sh
 ```
 
-The deployment script handles: AWS CLI verification, credential checks, parameter collection, S3 bucket creation, and sequential CloudFormation stack deployment (~10-15 min).
+The deployment script handles: AWS CLI verification, credential checks, parameter collection, S3 bucket creation, and parallel CloudFormation stack deployment (~10-15 min).
 
 ## Frontend
 
@@ -144,7 +144,7 @@ Use the [A2A Inspector](https://github.com/a2aproject/a2a-inspector) to debug an
 ## Cleanup
 
 ```bash
-uv run cleanup.py
+bash cleanup.sh
 ```
 
 Deletes all stacks in reverse order, empties S3 buckets, and removes AgentCore resources (~10-15 min).
